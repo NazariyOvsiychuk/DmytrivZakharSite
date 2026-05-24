@@ -35,9 +35,22 @@ export async function POST(request: NextRequest) {
     hourlyRate: number;
     mode?: "standard" | "terminal_only";
     deviceCode?: string;
+    enrollmentMethod?: "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint";
   };
 
   const mode = body.mode === "terminal_only" ? "terminal_only" : "standard";
+  const enrollmentMethod =
+    body.enrollmentMethod === "rfid_only" ||
+    body.enrollmentMethod === "fingerprint_only" ||
+    body.enrollmentMethod === "rfid_and_fingerprint"
+      ? body.enrollmentMethod
+      : "rfid_and_fingerprint";
+  const requireRfid = mode === "terminal_only" ? enrollmentMethod !== "fingerprint_only" : false;
+  const requireFingerprint = mode === "terminal_only" ? enrollmentMethod !== "rfid_only" : false;
+  const initialEnrollmentStatus =
+    mode !== "terminal_only"
+      ? "idle"
+      : "pending_pin";
   const randomPart = crypto.randomUUID();
   const generatedEmail = `terminal-${randomPart}@softfly.local`;
   const generatedPassword = `T-${randomPart}-${Date.now()}`;
@@ -79,8 +92,11 @@ export async function POST(request: NextRequest) {
       employee_id: createdUser.user.id,
       hourly_rate: body.hourlyRate,
       terminal_profile: mode === "terminal_only" ? "esp32_rfid" : "raspberry_pi",
+      enrollment_method: mode === "terminal_only" ? enrollmentMethod : "rfid_and_fingerprint",
+      require_rfid: requireRfid,
+      require_fingerprint: requireFingerprint,
       terminal_access_enabled: mode === "terminal_only" ? false : true,
-      enrollment_status: mode === "terminal_only" ? "pending_pin" : "idle",
+      enrollment_status: initialEnrollmentStatus,
       enrollment_device_code: mode === "terminal_only" ? body.deviceCode || null : null,
       enrollment_requested_at: mode === "terminal_only" ? new Date().toISOString() : null,
       enrollment_updated_at: new Date().toISOString(),

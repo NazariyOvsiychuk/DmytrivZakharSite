@@ -8,6 +8,8 @@ export type EnrollmentStatus =
   | "completed"
   | "cancelled";
 
+export type EnrollmentMethod = "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint";
+
 export function enrollmentPrompt(status: EnrollmentStatus) {
   switch (status) {
     case "pending_pin":
@@ -88,5 +90,17 @@ export function formatEnrollmentStatus(status: string | null | undefined) {
     case "idle":
     default:
       return "Не запускалось";
+  }
+}
+
+export function formatEnrollmentMethod(method: string | null | undefined) {
+  switch (method) {
+    case "rfid_only":
+      return "Тільки RFID";
+    case "fingerprint_only":
+      return "Тільки відбиток";
+    case "rfid_and_fingerprint":
+    default:
+      return "RFID + відбиток";
   }
 }

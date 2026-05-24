@@ -10,6 +10,9 @@ type EmployeeSettingsRow = {
   rfid_card_uid: string | null;
   terminal_access_enabled: boolean;
   terminal_profile: string;
+  enrollment_method: string;
+  require_rfid: boolean;
+  require_fingerprint: boolean;
   enrollment_status: string;
   enrollment_device_code: string | null;
   enrollment_pending_pin: string | null;
@@ -80,7 +83,7 @@ export async function POST(request: NextRequest) {
   const { data: row, error } = await adminSupabase
     .from("employee_settings")
     .select(
-      "employee_id, pin_code, fingerprint_id, rfid_card_uid, terminal_access_enabled, terminal_profile, enrollment_status, enrollment_device_code, enrollment_pending_pin, enrollment_pending_rfid_uid, profiles!employee_settings_employee_id_fkey(full_name,is_active)"
+      "employee_id, pin_code, fingerprint_id, rfid_card_uid, terminal_access_enabled, terminal_profile, enrollment_method, require_rfid, require_fingerprint, enrollment_status, enrollment_device_code, enrollment_pending_pin, enrollment_pending_rfid_uid, profiles!employee_settings_employee_id_fkey(full_name,is_active)"
     )
     .eq("employee_id", body.employeeId)
     .maybeSingle();
@@ -146,10 +149,11 @@ export async function POST(request: NextRequest) {
     if (pinCode !== settings.enrollment_pending_pin) {
       errorMessage = "Підтвердження PIN не збігається.";
     } else {
-      nextStatus = "scan_card_first";
+      nextStatus = settings.require_rfid ? "scan_card_first" : settings.require_fingerprint ? "scan_fingerprint" : "completed";
       patch = {
         pin_code: pinCode,
         enrollment_pending_pin: null,
+        terminal_access_enabled: !settings.require_rfid && !settings.require_fingerprint,
       };
     }
   } else if (settings.enrollment_status === "scan_card_first" && body.action === "scan_card") {
@@ -169,10 +173,11 @@ export async function POST(request: NextRequest) {
     if (!rfidUid || rfidUid !== settings.enrollment_pending_rfid_uid) {
       errorMessage = "Потрібно прикласти ту саму картку вдруге.";
     } else {
-      nextStatus = "scan_fingerprint";
+      nextStatus = settings.require_fingerprint ? "scan_fingerprint" : "completed";
       patch = {
         rfid_card_uid: rfidUid,
         enrollment_pending_rfid_uid: null,
+        terminal_access_enabled: !settings.require_fingerprint,
       };
     }
   } else if (settings.enrollment_status === "scan_fingerprint" && body.action === "submit_fingerprint") {

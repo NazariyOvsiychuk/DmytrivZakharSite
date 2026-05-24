@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatDate, formatDateTime, formatHours, formatMoney } from "@/lib/format";
-import { formatEnrollmentStatus } from "@/lib/terminal-enrollment";
+import { formatEnrollmentMethod, formatEnrollmentStatus } from "@/lib/terminal-enrollment";
 import { getAccessToken, supabase } from "@/lib/supabase";
 
 export type AdminSection =
@@ -26,6 +26,9 @@ type EmployeeRow = {
     rfid_card_uid: string | null;
     terminal_access_enabled: boolean;
     terminal_profile: "raspberry_pi" | "esp32_rfid";
+    enrollment_method: "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint";
+    require_rfid: boolean;
+    require_fingerprint: boolean;
     enrollment_status: string;
     enrollment_device_code: string | null;
   }> | null;
@@ -122,6 +125,9 @@ function employeeSettingsValue(
         rfid_card_uid: string | null;
         terminal_access_enabled: boolean;
         terminal_profile: "raspberry_pi" | "esp32_rfid";
+        enrollment_method: "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint";
+        require_rfid: boolean;
+        require_fingerprint: boolean;
         enrollment_status: string;
         enrollment_device_code: string | null;
       }
@@ -132,6 +138,9 @@ function employeeSettingsValue(
         rfid_card_uid: string | null;
         terminal_access_enabled: boolean;
         terminal_profile: "raspberry_pi" | "esp32_rfid";
+        enrollment_method: "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint";
+        require_rfid: boolean;
+        require_fingerprint: boolean;
         enrollment_status: string;
         enrollment_device_code: string | null;
       }>
@@ -237,6 +246,7 @@ export function AdminDashboardV2({ section }: { section: AdminSection }) {
 
   const [createEmployee, setCreateEmployee] = useState({
     mode: "terminal_only" as "standard" | "terminal_only",
+    enrollmentMethod: "rfid_and_fingerprint" as "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint",
     fullName: "",
     email: "",
     password: "",
@@ -490,6 +500,7 @@ export function AdminDashboardV2({ section }: { section: AdminSection }) {
       password: createEmployee.password,
       hourlyRate: Number(createEmployee.hourlyRate),
       deviceCode: createEmployee.deviceCode || undefined,
+      enrollmentMethod: createEmployee.enrollmentMethod,
     });
 
     setSubmitting(false);
@@ -500,6 +511,7 @@ export function AdminDashboardV2({ section }: { section: AdminSection }) {
 
     setCreateEmployee({
       mode: createEmployee.mode,
+      enrollmentMethod: createEmployee.enrollmentMethod,
       fullName: "",
       email: "",
       password: "",
@@ -533,6 +545,9 @@ export function AdminDashboardV2({ section }: { section: AdminSection }) {
     const result = await callAdminApi("/api/admin/employees/enrollment", {
       employeeId,
       deviceCode: deviceCode || undefined,
+      enrollmentMethod:
+        employeeSettingsValue(employees.find((row) => row.id === employeeId)?.employee_settings)?.enrollment_method ??
+        "rfid_and_fingerprint",
     });
     setSubmitting(false);
     if (!result.ok) setMessage(result.error ?? "Не вдалося перезапустити enroll.");
@@ -753,17 +768,35 @@ export function AdminDashboardV2({ section }: { section: AdminSection }) {
                   </label>
                 </>
               ) : (
-                <label className="field">
-                  <span>Термінал для enroll</span>
-                  <select value={createEmployee.deviceCode} onChange={(e) => setCreateEmployee({ ...createEmployee, deviceCode: e.target.value })}>
-                    <option value="">Будь-який доступний ESP32 terminal</option>
-                    {deviceTerminals.map((terminal) => (
-                      <option key={terminal.id} value={terminal.device_code}>
-                        {terminal.device_name} · {terminal.device_code}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <>
+                  <label className="field">
+                    <span>Термінал для enroll</span>
+                    <select value={createEmployee.deviceCode} onChange={(e) => setCreateEmployee({ ...createEmployee, deviceCode: e.target.value })}>
+                      <option value="">Будь-який доступний ESP32 terminal</option>
+                      {deviceTerminals.map((terminal) => (
+                        <option key={terminal.id} value={terminal.device_code}>
+                          {terminal.device_name} · {terminal.device_code}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Метод доступу</span>
+                    <select
+                      value={createEmployee.enrollmentMethod}
+                      onChange={(e) =>
+                        setCreateEmployee({
+                          ...createEmployee,
+                          enrollmentMethod: e.target.value as "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint",
+                        })
+                      }
+                    >
+                      <option value="rfid_only">Тільки RFID</option>
+                      <option value="fingerprint_only">Тільки відбиток</option>
+                      <option value="rfid_and_fingerprint">RFID + відбиток</option>
+                    </select>
+                  </label>
+                </>
               )}
               <label className="field">
                 <span>Ставка</span>
@@ -771,7 +804,7 @@ export function AdminDashboardV2({ section }: { section: AdminSection }) {
               </label>
               {createEmployee.mode === "terminal_only" ? (
                 <div className="hint-text">
-                  Після створення ESP32 сам проведе працівника через кроки: PIN → підтвердження PIN → картка x2 → відбиток.
+                  Після створення ESP32 сам проведе працівника через потрібні кроки залежно від методу доступу.
                 </div>
               ) : null}
               <button className="button button-primary full-width" disabled={submitting} type="submit">
@@ -1545,6 +1578,9 @@ function EditableEmployeeCardV2({
   const [rfidUid, setRfidUid] = useState(settings?.rfid_card_uid ?? "");
   const [terminalAccessEnabled, setTerminalAccessEnabled] = useState(settings?.terminal_access_enabled ?? true);
   const [terminalProfile, setTerminalProfile] = useState<"raspberry_pi" | "esp32_rfid">(settings?.terminal_profile ?? "raspberry_pi");
+  const [enrollmentMethod, setEnrollmentMethod] = useState<"rfid_only" | "fingerprint_only" | "rfid_and_fingerprint">(
+    settings?.enrollment_method ?? "rfid_and_fingerprint"
+  );
   const [isActive, setIsActive] = useState(employee.is_active);
 
   useEffect(() => {
@@ -1558,6 +1594,7 @@ function EditableEmployeeCardV2({
     setRfidUid(nextSettings?.rfid_card_uid ?? "");
     setTerminalAccessEnabled(nextSettings?.terminal_access_enabled ?? true);
     setTerminalProfile(nextSettings?.terminal_profile ?? "raspberry_pi");
+    setEnrollmentMethod(nextSettings?.enrollment_method ?? "rfid_and_fingerprint");
     setIsActive(employee.is_active);
   }, [employee]);
 
@@ -1571,6 +1608,7 @@ function EditableEmployeeCardV2({
       rfidUid: rfidUid || null,
       terminalAccessEnabled,
       terminalProfile,
+      enrollmentMethod,
       isActive,
     });
   }
@@ -1586,6 +1624,7 @@ function EditableEmployeeCardV2({
       rfidUid: rfidUid || null,
       terminalAccessEnabled,
       terminalProfile,
+      enrollmentMethod,
       isActive,
     });
     setPassword("");
@@ -1599,6 +1638,7 @@ function EditableEmployeeCardV2({
     setRfidUid(nextSettings?.rfid_card_uid ?? "");
     setTerminalAccessEnabled(nextSettings?.terminal_access_enabled ?? true);
     setTerminalProfile(nextSettings?.terminal_profile ?? "raspberry_pi");
+    setEnrollmentMethod(nextSettings?.enrollment_method ?? "rfid_and_fingerprint");
     setPassword("");
     setSecurityOpen(true);
   }
@@ -1621,6 +1661,9 @@ function EditableEmployeeCardV2({
               </span>
               <span className={settings?.enrollment_status === "completed" ? "status-paid" : "status-unpaid"}>
                 {formatEnrollmentStatus(settings?.enrollment_status)}
+              </span>
+              <span className="status-unpaid">
+                {formatEnrollmentMethod(settings?.enrollment_method)}
               </span>
             </div>
           </div>
@@ -1680,6 +1723,21 @@ function EditableEmployeeCardV2({
                   <option value="raspberry_pi">Raspberry Pi</option>
                 </select>
               </label>
+              {terminalProfile === "esp32_rfid" ? (
+                <label className="field">
+                  <span>Метод доступу</span>
+                  <select
+                    value={enrollmentMethod}
+                    onChange={(e) =>
+                      setEnrollmentMethod(e.target.value as "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint")
+                    }
+                  >
+                    <option value="rfid_only">Тільки RFID</option>
+                    <option value="fingerprint_only">Тільки відбиток</option>
+                    <option value="rfid_and_fingerprint">RFID + відбиток</option>
+                  </select>
+                </label>
+              ) : null}
               <label className="field checkbox-row">
                 <span>Активний</span>
                 <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
@@ -1738,6 +1796,22 @@ function EditableEmployeeCardV2({
                   </select>
                 </label>
               </div>
+
+              {terminalProfile === "esp32_rfid" ? (
+                <label className="field">
+                  <span>Метод доступу</span>
+                  <select
+                    value={enrollmentMethod}
+                    onChange={(e) =>
+                      setEnrollmentMethod(e.target.value as "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint")
+                    }
+                  >
+                    <option value="rfid_only">Тільки RFID</option>
+                    <option value="fingerprint_only">Тільки відбиток</option>
+                    <option value="rfid_and_fingerprint">RFID + відбиток</option>
+                  </select>
+                </label>
+              ) : null}
 
               <div className="field-row">
                 <label className="field">

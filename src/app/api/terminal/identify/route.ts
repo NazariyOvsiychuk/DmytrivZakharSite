@@ -8,6 +8,8 @@ type EmployeeIdentifyRow = {
   rfid_card_uid: string | null;
   terminal_profile: string;
   terminal_access_enabled: boolean;
+  require_rfid: boolean;
+  require_fingerprint: boolean;
   profiles:
     | {
         full_name: string;
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
   let query = adminSupabase
     .from("employee_settings")
     .select(
-      "employee_id, fingerprint_id, rfid_card_uid, terminal_profile, terminal_access_enabled, profiles!employee_settings_employee_id_fkey(full_name,role,is_active)"
+      "employee_id, fingerprint_id, rfid_card_uid, terminal_profile, terminal_access_enabled, require_rfid, require_fingerprint, profiles!employee_settings_employee_id_fkey(full_name,role,is_active)"
     )
     .eq("terminal_access_enabled", true)
     .limit(1);
@@ -82,6 +84,8 @@ export async function POST(request: NextRequest) {
     fingerprintId: currentEmployee.fingerprint_id,
     rfidUid: currentEmployee.rfid_card_uid,
     terminalProfile: currentEmployee.terminal_profile,
+    requireRfid: currentEmployee.require_rfid,
+    requireFingerprint: currentEmployee.require_fingerprint,
     nextAction: openShift ? "finish" : "start",
   });
 }

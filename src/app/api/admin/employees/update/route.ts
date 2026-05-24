@@ -44,8 +44,17 @@ export async function POST(request: NextRequest) {
     rfidUid?: string | null;
     terminalAccessEnabled: boolean;
     terminalProfile?: "raspberry_pi" | "esp32_rfid";
+    enrollmentMethod?: "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint";
     isActive: boolean;
   };
+  const enrollmentMethod =
+    body.enrollmentMethod === "rfid_only" ||
+    body.enrollmentMethod === "fingerprint_only" ||
+    body.enrollmentMethod === "rfid_and_fingerprint"
+      ? body.enrollmentMethod
+      : "rfid_and_fingerprint";
+  const requireRfid = enrollmentMethod !== "fingerprint_only";
+  const requireFingerprint = enrollmentMethod !== "rfid_only";
 
   const { data: currentSettings } = await adminSupabase
     .from("employee_settings")
@@ -104,6 +113,9 @@ export async function POST(request: NextRequest) {
         rfid_card_uid: body.rfidUid ? String(body.rfidUid).trim().toUpperCase() : null,
         terminal_access_enabled: body.terminalAccessEnabled,
         terminal_profile: body.terminalProfile === "esp32_rfid" ? "esp32_rfid" : "raspberry_pi",
+        enrollment_method: body.terminalProfile === "esp32_rfid" ? enrollmentMethod : "rfid_and_fingerprint",
+        require_rfid: body.terminalProfile === "esp32_rfid" ? requireRfid : false,
+        require_fingerprint: body.terminalProfile === "esp32_rfid" ? requireFingerprint : false,
         enrollment_updated_at: new Date().toISOString(),
       },
       { onConflict: "employee_id" }

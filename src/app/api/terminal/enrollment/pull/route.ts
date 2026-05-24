@@ -9,6 +9,9 @@ type EnrollmentRow = {
   fingerprint_id: number | null;
   rfid_card_uid: string | null;
   terminal_profile: string;
+  enrollment_method: string;
+  require_rfid: boolean;
+  require_fingerprint: boolean;
   enrollment_status: string;
   enrollment_device_code: string | null;
   enrollment_requested_at: string | null;
@@ -43,7 +46,7 @@ export async function POST(request: NextRequest) {
   const { data: rows, error } = await adminSupabase
     .from("employee_settings")
     .select(
-      "employee_id, pin_code, fingerprint_id, rfid_card_uid, terminal_profile, enrollment_status, enrollment_device_code, enrollment_requested_at, profiles!employee_settings_employee_id_fkey(full_name,is_active)"
+      "employee_id, pin_code, fingerprint_id, rfid_card_uid, terminal_profile, enrollment_method, require_rfid, require_fingerprint, enrollment_status, enrollment_device_code, enrollment_requested_at, profiles!employee_settings_employee_id_fkey(full_name,is_active)"
     )
     .eq("terminal_profile", "esp32_rfid")
     .in("enrollment_status", activeStatuses)
@@ -88,6 +91,9 @@ export async function POST(request: NextRequest) {
     fingerprintId: current.fingerprint_id,
     rfidUid: current.rfid_card_uid,
     terminalProfile: current.terminal_profile,
+    enrollmentMethod: current.enrollment_method,
+    requireRfid: current.require_rfid,
+    requireFingerprint: current.require_fingerprint,
     prompt,
   });
 }

@@ -31,7 +31,16 @@ export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
     employeeId: string;
     deviceCode?: string;
+    enrollmentMethod?: "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint";
   };
+  const enrollmentMethod =
+    body.enrollmentMethod === "rfid_only" ||
+    body.enrollmentMethod === "fingerprint_only" ||
+    body.enrollmentMethod === "rfid_and_fingerprint"
+      ? body.enrollmentMethod
+      : "rfid_and_fingerprint";
+  const requireRfid = enrollmentMethod !== "fingerprint_only";
+  const requireFingerprint = enrollmentMethod !== "rfid_only";
 
   const { error } = await adminSupabase
     .from("employee_settings")
@@ -41,6 +50,9 @@ export async function POST(request: NextRequest) {
       rfid_card_uid: null,
       terminal_access_enabled: false,
       terminal_profile: "esp32_rfid",
+      enrollment_method: enrollmentMethod,
+      require_rfid: requireRfid,
+      require_fingerprint: requireFingerprint,
       enrollment_status: "pending_pin",
       enrollment_device_code: body.deviceCode || null,
       enrollment_pending_pin: null,
