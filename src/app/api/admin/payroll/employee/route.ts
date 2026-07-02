@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createUserScopedClient } from "@/lib/admin-server";
 import { buildPayrollEmployeeDetail } from "@/lib/payroll-admin";
+import { normalizePayrollMode } from "@/lib/payroll-mode";
 
 export async function POST(request: NextRequest) {
   const accessToken = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
     employeeId?: string;
     periodStart?: string;
     periodEnd?: string;
+    payrollMode?: string;
   };
 
   if (!body.employeeId || !body.periodStart || !body.periodEnd) {
@@ -34,7 +36,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const payload = await buildPayrollEmployeeDetail(body.employeeId, body.periodStart, body.periodEnd);
+    const payload = await buildPayrollEmployeeDetail(
+      body.employeeId,
+      body.periodStart,
+      body.periodEnd,
+      normalizePayrollMode(body.payrollMode)
+    );
     return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json(
@@ -43,4 +50,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

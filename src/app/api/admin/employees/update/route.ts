@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
     email?: string;
     password?: string;
     hourlyRate: number;
+    testMonthlySalary?: number;
     pinCode: string;
     fingerprintId: number | null;
     rfidUid?: string | null;
@@ -46,6 +47,11 @@ export async function POST(request: NextRequest) {
     terminalProfile?: "raspberry_pi" | "esp32_rfid";
     enrollmentMethod?: "rfid_only" | "fingerprint_only" | "rfid_and_fingerprint";
     isActive: boolean;
+    overtimePolicies?: Array<{
+      weekday: number;
+      overtimeEnabled: boolean;
+      overtimeMultiplier: number;
+    }>;
   };
   const enrollmentMethod =
     body.enrollmentMethod === "rfid_only" ||
@@ -60,6 +66,16 @@ export async function POST(request: NextRequest) {
     .from("employee_settings")
     .select("hourly_rate")
     .eq("employee_id", body.employeeId)
+    .maybeSingle();
+
+  const { data: currentTestRate } = await adminSupabase
+    .from("employee_payroll_rates")
+    .select("rate_amount")
+    .eq("employee_id", body.employeeId)
+    .eq("payroll_mode", "test")
+    .eq("rate_kind", "monthly")
+    .order("effective_from", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (body.email) {
@@ -123,6 +139,59 @@ export async function POST(request: NextRequest) {
 
   if (settingsError) {
     return NextResponse.json({ error: settingsError.message }, { status: 400 });
+  }
+
+  if (Array.isArray(body.overtimePolicies)) {
+    const rows = body.overtimePolicies
+      .filter((policy) => Number(policy.weekday) >= 1 && Number(policy.weekday) <= 7)
+      .map((policy) => ({
+        employee_id: body.employeeId,
+        payroll_mode: "test",
+        weekday: Math.max(1, Math.min(7, Math.floor(Number(policy.weekday)))),
+        overtime_enabled: Boolean(policy.overtimeEnabled),
+        overtime_multiplier: Number(policy.overtimeMultiplier) === 1.5 ? 1.5 : 1.25,
+      }));
+
+    const { error: overtimeDeleteError } = await adminSupabase
+      .from("employee_overtime_policies")
+      .delete()
+      .eq("employee_id", body.employeeId)
+      .eq("payroll_mode", "test");
+
+    if (overtimeDeleteError) {
+      return NextResponse.json({ error: overtimeDeleteError.message }, { status: 400 });
+    }
+
+    if (rows.length > 0) {
+      const { error: overtimeInsertError } = await adminSupabase
+        .from("employee_overtime_policies")
+        .insert(rows);
+
+      if (overtimeInsertError) {
+        return NextResponse.json({ error: overtimeInsertError.message }, { status: 400 });
+      }
+    }
+  }
+
+  if (
+    body.testMonthlySalary !== undefined &&
+    Number.isFinite(Number(body.testMonthlySalary)) &&
+    Number(body.testMonthlySalary) >= 0 &&
+    Number(currentTestRate?.rate_amount ?? 0) !== Number(body.testMonthlySalary)
+  ) {
+    const { error: testRateError } = await adminSupabase.from("employee_payroll_rates").insert({
+      employee_id: body.employeeId,
+      payroll_mode: "test",
+      rate_kind: "monthly",
+      rate_amount: Math.round(Number(body.testMonthlySalary) * 100) / 100,
+      standard_day_hours: 9,
+      effective_from: currentTestRate ? new Date().toISOString() : "1970-01-01T00:00:00.000Z",
+      created_by: auth.user?.id ?? null,
+    });
+
+    if (testRateError) {
+      return NextResponse.json({ error: testRateError.message }, { status: 400 });
+    }
   }
 
   if (Number(currentSettings?.hourly_rate ?? 0) !== Number(body.hourlyRate ?? 0)) {

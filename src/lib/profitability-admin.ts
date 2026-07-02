@@ -1,5 +1,9 @@
 import { adminSupabase } from "@/lib/admin-server";
-import { calculateShiftCompensation, loadPayrollRules } from "@/lib/payroll-rules";
+import {
+  calculateDailyShiftCompensations,
+  loadPayrollRules,
+  resolveOvertimeSettings,
+} from "@/lib/payroll-rules";
 
 type BatchRow = {
   id: string;
@@ -196,48 +200,71 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
     ratesByEmployee.set(employeeId, list);
   }
 
-  const currentRateByEmployee = new Map<string, number>();
+  const currentMonthlyBaseByEmployee = new Map<string, number>();
   for (const employee of employeesResult.data ?? []) {
     const employeeId = String(employee.id);
-    const fallbackRate = numeric(
+    const fallbackMonthlyBase = numeric(
       relationFirst(
         employee.employee_settings as Array<{ hourly_rate: number }> | { hourly_rate: number } | null
       )?.hourly_rate
     );
-    const latestRate = ratesByEmployee.get(employeeId)?.at(-1)?.hourlyRate ?? fallbackRate;
-    currentRateByEmployee.set(employeeId, latestRate);
+    const latestMonthlyBase = ratesByEmployee.get(employeeId)?.at(-1)?.hourlyRate ?? fallbackMonthlyBase;
+    currentMonthlyBaseByEmployee.set(employeeId, latestMonthlyBase);
   }
 
+  const groupedShifts = new Map<string, Array<any>>();
   for (const shift of shiftsResult.data ?? []) {
     const shiftDate = String(shift.shift_date);
     if (!coveredBatchDates.has(shiftDate)) continue;
+    const key = String(shift.employee_id);
+    const list = groupedShifts.get(key) ?? [];
+    list.push(shift);
+    groupedShifts.set(key, list);
+  }
 
-    const employeeId = String(shift.employee_id);
+  for (const shifts of groupedShifts.values()) {
+    const employeeId = String(shifts[0].employee_id);
     const row = payrollRowsMap.get(employeeId);
     if (!row) continue;
 
-    const minutes = Math.max(0, Math.floor(numeric(shift.duration_minutes)));
+    const compensationMap = calculateDailyShiftCompensations({
+      shifts: shifts.map((shift) => {
+        const startedAt = String(shift.started_at);
+        const employeeRates = ratesByEmployee.get(employeeId) ?? [];
+        let monthlyBase = currentMonthlyBaseByEmployee.get(employeeId) ?? 0;
+        for (const candidate of employeeRates) {
+          if (candidate.effectiveFrom <= startedAt) {
+            monthlyBase = candidate.hourlyRate;
+          }
+        }
 
-    const shiftStartedAt = String(shift.started_at);
-    const employeeRates = ratesByEmployee.get(employeeId) ?? [];
-    let shiftRate = currentRateByEmployee.get(employeeId) ?? 0;
-    for (const candidate of employeeRates) {
-      if (candidate.effectiveFrom <= shiftStartedAt) {
-        shiftRate = candidate.hourlyRate;
-      }
-    }
-
-    const compensation = calculateShiftCompensation({
-      startedAt: shiftStartedAt,
-      endedAt: shift.ended_at ? String(shift.ended_at) : null,
-      durationMinutes: minutes,
-      hourlyRate: shiftRate,
+        return {
+          shiftId: String(shift.id),
+          employeeId,
+          shiftDate: String(shift.shift_date),
+          startedAt,
+          endedAt: shift.ended_at ? String(shift.ended_at) : null,
+          durationMinutes: Math.max(0, Math.floor(numeric(shift.duration_minutes))),
+          hourlyRate: monthlyBase,
+        };
+      }),
       settings: rules.settings,
       breakPolicies: rules.breakPolicies,
+      overtimePolicyResolver: (businessDate) =>
+        resolveOvertimeSettings({
+          employeeId,
+          shiftDate: businessDate,
+          settings: rules.settings,
+          employeeOvertimePolicies: rules.employeeOvertimePolicies,
+        }),
     });
 
-    row.workedMinutes += compensation.payableMinutes;
-    row.totalDue = roundMoney(row.totalDue + compensation.grossAmount);
+    for (const shift of shifts) {
+      const compensation = compensationMap.get(String(shift.id));
+      if (!compensation) continue;
+      row.workedMinutes += compensation.payableMinutes;
+      row.totalDue = roundMoney(row.totalDue + compensation.grossAmount);
+    }
   }
 
   const payrollRows = Array.from(payrollRowsMap.values())

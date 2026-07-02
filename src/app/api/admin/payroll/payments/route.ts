@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminSupabase, createUserScopedClient } from "@/lib/admin-server";
 import { recordPayment } from "@/lib/domain/payroll-domain";
+import { normalizePayrollMode } from "@/lib/payroll-mode";
 
 async function requireAdmin(request: NextRequest) {
   const accessToken = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -24,7 +25,7 @@ async function requireAdmin(request: NextRequest) {
 async function findPaymentAndLedger(paymentId: string) {
   const { data: payment, error: paymentError } = await adminSupabase
     .from("salary_payments")
-    .select("id, employee_id, payment_date, payment_type, amount, comment, created_at")
+    .select("id, employee_id, payment_date, payment_type, amount, comment, created_at, payroll_mode")
     .eq("id", paymentId)
     .maybeSingle();
 
@@ -35,6 +36,7 @@ async function findPaymentAndLedger(paymentId: string) {
     .from("financial_ledger_entries")
     .select("id")
     .eq("employee_id", payment.employee_id)
+    .eq("payroll_mode", payment.payroll_mode)
     .contains("metadata", { paymentId })
     .limit(1)
     .maybeSingle();
@@ -47,6 +49,7 @@ async function findPaymentAndLedger(paymentId: string) {
     .from("financial_ledger_entries")
     .select("id")
     .eq("employee_id", payment.employee_id)
+    .eq("payroll_mode", payment.payroll_mode)
     .eq("entry_type", entryType)
     .eq("occurred_on", payment.payment_date)
     .eq("amount", -Math.abs(Number(payment.amount)))
@@ -68,6 +71,7 @@ export async function POST(request: NextRequest) {
     paymentType?: "advance" | "salary";
     amount?: number;
     comment?: string;
+    payrollMode?: string;
   };
 
   if (!body.employeeId || !body.paymentDate || !body.paymentType || !body.amount) {
@@ -87,6 +91,7 @@ export async function POST(request: NextRequest) {
       amount,
       paymentDate: body.paymentDate,
       comment: body.comment?.trim() || null,
+      payrollMode: normalizePayrollMode(body.payrollMode),
     });
   } catch (error) {
     return NextResponse.json(
@@ -108,6 +113,7 @@ export async function PATCH(request: NextRequest) {
     paymentType?: "advance" | "salary";
     amount?: number;
     comment?: string;
+    payrollMode?: string;
   };
 
   if (!body.paymentId || !body.paymentDate || !body.paymentType || !body.amount) {
@@ -121,6 +127,10 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const { payment, ledgerId } = await findPaymentAndLedger(body.paymentId);
+    const payrollMode = normalizePayrollMode(body.payrollMode ?? payment.payroll_mode);
+    if (payrollMode !== payment.payroll_mode) {
+      throw new Error("Не можна переносити виплату між основним і тестовим режимами.");
+    }
     const normalizedComment = body.comment?.trim() || null;
 
     const { error: paymentUpdateError } = await adminSupabase
@@ -149,6 +159,7 @@ export async function PATCH(request: NextRequest) {
             previousPaymentType: payment.payment_type,
           },
           created_by: auth.userId,
+          payroll_mode: payrollMode,
         })
         .eq("id", ledgerId);
 

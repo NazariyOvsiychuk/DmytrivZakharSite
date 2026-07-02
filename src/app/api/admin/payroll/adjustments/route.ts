@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminSupabase, createUserScopedClient } from "@/lib/admin-server";
+import { normalizePayrollMode } from "@/lib/payroll-mode";
 
 async function requireAdmin(request: NextRequest) {
   const accessToken = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
     amount?: number;
     effectiveDate?: string;
     reason?: string;
+    payrollMode?: string;
   };
 
   if (!body.employeeId || !body.kind || !body.effectiveDate || !body.amount) {
@@ -43,6 +45,7 @@ export async function POST(request: NextRequest) {
 
   const normalizedReason = body.reason?.trim() || null;
   const normalizedAmount = Math.round(amount * 100) / 100;
+  const payrollMode = normalizePayrollMode(body.payrollMode);
 
   const { data: adjustment, error: adjustmentError } = await adminSupabase
     .from("pay_adjustments")
@@ -53,6 +56,7 @@ export async function POST(request: NextRequest) {
       reason: normalizedReason,
       effective_date: body.effectiveDate,
       created_by: auth.userId,
+      payroll_mode: payrollMode,
     })
     .select("id")
     .single();
@@ -68,9 +72,11 @@ export async function POST(request: NextRequest) {
     occurred_on: body.effectiveDate,
     comment: normalizedReason,
     created_by: auth.userId,
+    payroll_mode: payrollMode,
     metadata: {
       adjustmentId: adjustment.id,
       kind: body.kind,
+      payrollMode,
     },
   });
 

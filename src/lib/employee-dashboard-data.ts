@@ -1,5 +1,9 @@
 import { adminSupabase } from "@/lib/admin-server";
-import { calculateShiftCompensation, loadPayrollRules } from "@/lib/payroll-rules";
+import {
+  calculateDailyShiftCompensations,
+  loadPayrollRules,
+  resolveOvertimeSettings,
+} from "@/lib/payroll-rules";
 
 function numeric(value: unknown) {
   const n = Number(value ?? 0);
@@ -39,19 +43,22 @@ export async function buildEmployeeDashboardData(employeeId: string) {
         .limit(120),
       adminSupabase
         .from("payroll_run_items")
-        .select("id, worked_minutes, gross_amount, bonuses_amount, deductions_amount, total_due, paid_amount, balance_amount, snapshot, created_at, payroll_runs!inner(period_start, period_end, status, created_at)")
+        .select("id, worked_minutes, gross_amount, bonuses_amount, deductions_amount, total_due, paid_amount, balance_amount, snapshot, created_at, payroll_runs!inner(period_start, period_end, status, created_at, payroll_mode)")
         .eq("employee_id", employeeId)
+        .eq("payroll_runs.payroll_mode", "main")
         .order("created_at", { ascending: false }),
       adminSupabase
         .from("salary_payments")
         .select("id, payment_date, payment_type, amount, comment, created_at")
         .eq("employee_id", employeeId)
+        .eq("payroll_mode", "main")
         .order("payment_date", { ascending: false })
         .order("created_at", { ascending: false }),
       adminSupabase
         .from("pay_adjustments")
         .select("id, effective_date, kind, amount")
         .eq("employee_id", employeeId)
+        .eq("payroll_mode", "main")
         .order("effective_date", { ascending: false }),
       adminSupabase
         .from("employee_hourly_rates")
@@ -75,7 +82,7 @@ export async function buildEmployeeDashboardData(employeeId: string) {
   if (rateHistoryResult.error) throw new Error(rateHistoryResult.error.message);
   if (violationsResult.error) throw new Error(violationsResult.error.message);
 
-  const fallbackRate = numeric(
+  const fallbackMonthlyBase = numeric(
     relationFirst(
       profileResult.data.employee_settings as Array<{ hourly_rate: number }> | { hourly_rate: number } | null
     )?.hourly_rate
@@ -84,7 +91,7 @@ export async function buildEmployeeDashboardData(employeeId: string) {
     effectiveFrom: String(row.effective_from),
     hourlyRate: numeric(row.hourly_rate),
   }));
-  const latestRate = rates.at(-1)?.hourlyRate ?? fallbackRate;
+  const latestMonthlyBase = rates.at(-1)?.hourlyRate ?? fallbackMonthlyBase;
 
   const payrollItems = (payrollItemsResult.data ?? []).map((item: any) => ({
     id: String(item.id),
@@ -102,22 +109,54 @@ export async function buildEmployeeDashboardData(employeeId: string) {
     runStatus: String(item.payroll_runs?.status ?? "draft"),
   }));
 
-  const shifts = (shiftsResult.data ?? []).map((shift) => {
-    const minutes = Math.max(0, Math.floor(numeric(shift.duration_minutes)));
-    let shiftRate = latestRate;
-    for (const candidate of rates) {
-      if (candidate.effectiveFrom <= String(shift.started_at)) {
-        shiftRate = candidate.hourlyRate;
-      }
-    }
-    const compensation = calculateShiftCompensation({
-      startedAt: String(shift.started_at),
-      endedAt: shift.ended_at ? String(shift.ended_at) : null,
-      durationMinutes: minutes,
-      hourlyRate: shiftRate,
+  const compensationMap = new Map<string, { payableMinutes: number; grossAmount: number }>();
+  const groupedShifts = new Map<string, Array<any>>();
+  for (const shift of shiftsResult.data ?? []) {
+    const key = String(employeeId);
+    const list = groupedShifts.get(key) ?? [];
+    list.push(shift);
+    groupedShifts.set(key, list);
+  }
+
+  for (const shiftsForDay of groupedShifts.values()) {
+    const dailyCompensationMap = calculateDailyShiftCompensations({
+      shifts: shiftsForDay.map((shift) => {
+        const startedAt = String(shift.started_at);
+        let monthlyBase = latestMonthlyBase;
+        for (const candidate of rates) {
+          if (candidate.effectiveFrom <= startedAt) {
+            monthlyBase = candidate.hourlyRate;
+          }
+        }
+
+        return {
+          shiftId: String(shift.id),
+          employeeId,
+          shiftDate: String(shift.shift_date),
+          startedAt,
+          endedAt: shift.ended_at ? String(shift.ended_at) : null,
+          durationMinutes: Math.max(0, Math.floor(numeric(shift.duration_minutes))),
+          hourlyRate: monthlyBase,
+        };
+      }),
       settings: rules.settings,
       breakPolicies: rules.breakPolicies,
+      overtimePolicyResolver: (businessDate) =>
+        resolveOvertimeSettings({
+          employeeId,
+          shiftDate: businessDate,
+          settings: rules.settings,
+          employeeOvertimePolicies: rules.employeeOvertimePolicies,
+        }),
     });
+
+    for (const [shiftId, compensation] of dailyCompensationMap.entries()) {
+      compensationMap.set(shiftId, compensation);
+    }
+  }
+
+  const shifts = (shiftsResult.data ?? []).map((shift) => {
+    const compensation = compensationMap.get(String(shift.id));
 
     const includedInPayroll = payrollItems.some(
       (item) =>
@@ -132,10 +171,10 @@ export async function buildEmployeeDashboardData(employeeId: string) {
       shiftDate: String(shift.shift_date),
       startedAt: String(shift.started_at),
       endedAt: shift.ended_at ? String(shift.ended_at) : null,
-      durationMinutes: compensation.payableMinutes,
+      durationMinutes: compensation?.payableMinutes ?? 0,
       status: String(shift.status),
       includedInPayroll,
-      grossAmount: compensation.grossAmount,
+      grossAmount: compensation?.grossAmount ?? 0,
     };
   });
 

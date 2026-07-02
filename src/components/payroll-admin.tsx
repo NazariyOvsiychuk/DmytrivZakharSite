@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatDate, formatDateTime, formatHours, formatMoney } from "@/lib/format";
 import { getAccessToken } from "@/lib/supabase";
+import { normalizePayrollMode, payrollModeLabel, type PayrollMode } from "@/lib/payroll-mode";
 
 type PeriodPreset = "today" | "week" | "month" | "previousMonth" | "custom";
 type PaymentType = "advance" | "salary";
@@ -14,6 +15,8 @@ type PayrollSummaryRow = {
   fullName: string;
   email: string;
   hourlyRate: number;
+  rateBaseAmount: number;
+  rateKind: "hourly" | "monthly";
   workedMinutes: number;
   grossAmount: number;
   bonusesAmount: number;
@@ -154,7 +157,7 @@ function adjustmentTypeLabel(type: AdjustmentType) {
   return type === "bonus" ? "Бонус" : "Штраф";
 }
 
-export function PayrollAdminPage() {
+export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
   const initialRange = getPresetRange("month");
   const [preset, setPreset] = useState<PeriodPreset>("month");
   const [range, setRange] = useState(initialRange);
@@ -164,6 +167,7 @@ export function PayrollAdminPage() {
   const [summary, setSummary] = useState<PayrollSummaryPayload | null>(null);
   const [payments, setPayments] = useState<PayrollPaymentRow[]>([]);
   const [paymentEditor, setPaymentEditor] = useState<PaymentFormState | null>(null);
+  const [payrollMode, setPayrollMode] = useState<PayrollMode>(() => normalizePayrollMode(props.initialMode));
 
   useEffect(() => {
     if (preset === "custom") return;
@@ -176,8 +180,8 @@ export function PayrollAdminPage() {
       setMessage(null);
 
       const [summaryResult, historyResult] = await Promise.all([
-        callAdminJson<PayrollSummaryPayload>("/api/admin/payroll/summary", { body: { periodStart: range.start, periodEnd: range.end } }),
-        callAdminJson<{ payments: PayrollPaymentRow[] }>("/api/admin/payroll/history", { body: { periodStart: range.start, periodEnd: range.end } }),
+        callAdminJson<PayrollSummaryPayload>("/api/admin/payroll/summary", { body: { periodStart: range.start, periodEnd: range.end, payrollMode } }),
+        callAdminJson<{ payments: PayrollPaymentRow[] }>("/api/admin/payroll/history", { body: { periodStart: range.start, periodEnd: range.end, payrollMode } }),
       ]);
 
       if (!summaryResult.ok) {
@@ -198,7 +202,7 @@ export function PayrollAdminPage() {
     }
 
     void load();
-  }, [range.end, range.start]);
+  }, [payrollMode, range.end, range.start]);
 
   async function handleExport() {
     const token = await getAccessToken();
@@ -208,7 +212,7 @@ export function PayrollAdminPage() {
     }
 
     const response = await fetch(
-      `/api/admin/exports/payroll?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`,
+      `/api/admin/exports/payroll?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}&mode=${payrollMode}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -243,6 +247,7 @@ export function PayrollAdminPage() {
         paymentDate: paymentEditor.paymentDate,
         amount: Number(paymentEditor.amount),
         comment: paymentEditor.comment,
+        payrollMode,
       },
     });
 
@@ -255,8 +260,8 @@ export function PayrollAdminPage() {
     setMessage(result.data.message ?? "Виплату оновлено.");
 
     const [summaryResult, historyResult] = await Promise.all([
-      callAdminJson<PayrollSummaryPayload>("/api/admin/payroll/summary", { body: { periodStart: range.start, periodEnd: range.end } }),
-      callAdminJson<{ payments: PayrollPaymentRow[] }>("/api/admin/payroll/history", { body: { periodStart: range.start, periodEnd: range.end } }),
+      callAdminJson<PayrollSummaryPayload>("/api/admin/payroll/summary", { body: { periodStart: range.start, periodEnd: range.end, payrollMode } }),
+      callAdminJson<{ payments: PayrollPaymentRow[] }>("/api/admin/payroll/history", { body: { periodStart: range.start, periodEnd: range.end, payrollMode } }),
     ]);
 
     if (summaryResult.ok) setSummary(summaryResult.data);
@@ -267,7 +272,7 @@ export function PayrollAdminPage() {
     if (!window.confirm("Видалити цю виплату?")) return;
     const result = await callAdminJson<{ message: string }>("/api/admin/payroll/payments", {
       method: "DELETE",
-      body: { paymentId },
+      body: { paymentId, payrollMode },
     });
     if (!result.ok) {
       setMessage(result.error ?? "Не вдалося видалити виплату.");
@@ -277,8 +282,8 @@ export function PayrollAdminPage() {
     setMessage(result.data.message ?? "Виплату видалено.");
 
     const [summaryResult, historyResult] = await Promise.all([
-      callAdminJson<PayrollSummaryPayload>("/api/admin/payroll/summary", { body: { periodStart: range.start, periodEnd: range.end } }),
-      callAdminJson<{ payments: PayrollPaymentRow[] }>("/api/admin/payroll/history", { body: { periodStart: range.start, periodEnd: range.end } }),
+      callAdminJson<PayrollSummaryPayload>("/api/admin/payroll/summary", { body: { periodStart: range.start, periodEnd: range.end, payrollMode } }),
+      callAdminJson<{ payments: PayrollPaymentRow[] }>("/api/admin/payroll/history", { body: { periodStart: range.start, periodEnd: range.end, payrollMode } }),
     ]);
 
     if (summaryResult.ok) setSummary(summaryResult.data);
@@ -294,7 +299,9 @@ export function PayrollAdminPage() {
           <p className="eyebrow">Payroll</p>
           <h1>Зарплата та фінансовий аудит</h1>
           <p className="muted-copy">
-            Погодинна оплата, часткові виплати, аванси та прозорий баланс по кожному працівнику.
+            {payrollMode === "main"
+              ? "Робочі нарахування, фактичні виплати та реальний баланс."
+              : "Безпечна симуляція нової формули на тих самих працівниках і змінах."}
           </p>
         </div>
 
@@ -306,6 +313,21 @@ export function PayrollAdminPage() {
       </div>
 
       <section className="panel payroll-toolbar">
+        <div className="segmented-control" aria-label="Режим нарахувань">
+          {(["main", "test"] as PayrollMode[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={payrollMode === mode ? "active" : ""}
+              onClick={() => setPayrollMode(mode)}
+            >
+              {payrollModeLabel(mode)}
+            </button>
+          ))}
+        </div>
+        {payrollMode === "test" ? (
+          <p className="hint">Тестовий режим не змінює основні нарахування, виплати чи баланс.</p>
+        ) : null}
         <div className="segmented-control">
           {[
             ["today", "Сьогодні"],
@@ -382,7 +404,7 @@ export function PayrollAdminPage() {
           <div className="schedule-table">
             <div className="table-row header payroll-summary-row">
               <strong>Працівник</strong>
-              <span>Ставка</span>
+              <span>{payrollMode === "test" ? "Місячна / за годину" : "Ставка за годину"}</span>
               <span>Години</span>
               <span>Нараховано</span>
               <span>Бонуси / штрафи</span>
@@ -394,11 +416,15 @@ export function PayrollAdminPage() {
             {(summary?.rows ?? []).map((row) => (
               <Link
                 key={row.employeeId}
-                href={`/admin/payroll/${row.employeeId}?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`}
+                href={`/admin/payroll/${row.employeeId}?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}&mode=${payrollMode}`}
                 className="table-row payroll-summary-row payroll-row-link"
               >
                 <strong>{row.fullName}</strong>
-                <span>{formatMoney(row.hourlyRate)}</span>
+                <span>
+                  {payrollMode === "test"
+                    ? `${formatMoney(row.rateBaseAmount)} / ${formatMoney(row.hourlyRate)}`
+                    : formatMoney(row.hourlyRate)}
+                </span>
                 <span>{formatHours(row.workedMinutes)}</span>
                 <span>{formatMoney(row.grossAmount)}</span>
                 <span>
@@ -510,11 +536,13 @@ export function PayrollEmployeePage(props: {
   employeeId: string;
   initialStart: string;
   initialEnd: string;
+  initialMode: PayrollMode;
 }) {
   const [range, setRange] = useState({ start: props.initialStart, end: props.initialEnd });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [data, setData] = useState<PayrollEmployeePayload | null>(null);
+  const [payrollMode, setPayrollMode] = useState<PayrollMode>(normalizePayrollMode(props.initialMode));
   const [paymentForm, setPaymentForm] = useState({
     open: false,
     mode: "create" as "create" | "edit",
@@ -549,7 +577,7 @@ export function PayrollEmployeePage(props: {
     setLoading(true);
     setMessage(null);
     const result = await callAdminJson<PayrollEmployeePayload>("/api/admin/payroll/employee", {
-      body: { employeeId: props.employeeId, periodStart: range.start, periodEnd: range.end },
+      body: { employeeId: props.employeeId, periodStart: range.start, periodEnd: range.end, payrollMode },
     });
 
     if (!result.ok) {
@@ -563,7 +591,7 @@ export function PayrollEmployeePage(props: {
 
   useEffect(() => {
     void load();
-  }, [range.end, range.start]);
+  }, [payrollMode, range.end, range.start]);
 
   async function submitPayment() {
     if (!paymentForm.amount) {
@@ -579,6 +607,7 @@ export function PayrollEmployeePage(props: {
             paymentDate: paymentForm.paymentDate,
             amount: Number(paymentForm.amount),
             comment: paymentForm.comment,
+            payrollMode,
           },
         }
       : {
@@ -589,6 +618,7 @@ export function PayrollEmployeePage(props: {
             paymentDate: paymentForm.paymentDate,
             amount: Number(paymentForm.amount),
             comment: paymentForm.comment,
+            payrollMode,
           },
         });
 
@@ -622,6 +652,7 @@ export function PayrollEmployeePage(props: {
         effectiveDate: adjustmentForm.effectiveDate,
         amount: Number(adjustmentForm.amount),
         reason: adjustmentForm.reason,
+        payrollMode,
       },
     });
 
@@ -645,7 +676,7 @@ export function PayrollEmployeePage(props: {
     if (!window.confirm("Видалити цю виплату?")) return;
     const result = await callAdminJson<{ message: string }>("/api/admin/payroll/payments", {
       method: "DELETE",
-      body: { paymentId },
+      body: { paymentId, payrollMode },
     });
     if (!result.ok) {
       setMessage(result.error ?? "Не вдалося видалити виплату.");
@@ -705,16 +736,23 @@ export function PayrollEmployeePage(props: {
     <section className="payroll-shell">
       <div className="payroll-hero">
         <div>
-          <Link href={`/admin/payroll?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`} className="eyebrow-link">
+          <Link href={`/admin/payroll?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}&mode=${payrollMode}`} className="eyebrow-link">
             Назад до зарплати
           </Link>
           <h1>{data?.employee.fullName ?? "Працівник"}</h1>
           <p className="muted-copy">
-            {data?.employee.email ?? ""} · ставка {formatMoney(data?.employee.hourlyRate ?? 0)}
+            {data?.employee.email ?? ""} · {payrollModeLabel(payrollMode)} режим · ставка за годину {formatMoney(data?.employee.hourlyRate ?? 0)}
           </p>
         </div>
 
         <div className="payroll-date-grid compact">
+          <div className="segmented-control">
+            {(["main", "test"] as PayrollMode[]).map((mode) => (
+              <button key={mode} type="button" className={payrollMode === mode ? "active" : ""} onClick={() => setPayrollMode(mode)}>
+                {payrollModeLabel(mode)}
+              </button>
+            ))}
+          </div>
           <label className="field">
             <span>Початок</span>
             <input type="date" value={range.start} onChange={(e) => setRange((current) => ({ ...current, start: e.target.value }))} />

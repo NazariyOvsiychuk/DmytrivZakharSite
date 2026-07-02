@@ -38,9 +38,10 @@ export async function POST(request: NextRequest) {
       {
         period_start: body.periodStart,
         period_end: body.periodEnd,
+        payroll_mode: "main",
         created_by: user?.id ?? null,
       },
-      { onConflict: "period_start,period_end" }
+      { onConflict: "period_start,period_end,payroll_mode" }
     )
     .select("id")
     .single();

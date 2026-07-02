@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminSupabase, createUserScopedClient } from "@/lib/admin-server";
 import { buildPayrollSummary } from "@/lib/payroll-admin";
+import { normalizePayrollMode } from "@/lib/payroll-mode";
 
 export async function POST(request: NextRequest) {
   const accessToken = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -23,19 +24,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Доступ лише для адміністратора." }, { status: 403 });
   }
 
-  const body = (await request.json().catch(() => ({}))) as { periodStart?: string; periodEnd?: string };
+  const body = (await request.json().catch(() => ({}))) as { periodStart?: string; periodEnd?: string; payrollMode?: string };
   if (!body.periodStart || !body.periodEnd) {
     return NextResponse.json({ error: "Потрібні periodStart і periodEnd." }, { status: 400 });
   }
 
   try {
-    const summary = await buildPayrollSummary(body.periodStart, body.periodEnd);
+    const payrollMode = normalizePayrollMode(body.payrollMode);
+    const summary = await buildPayrollSummary(body.periodStart, body.periodEnd, payrollMode);
     const { data: run, error: runError } = await adminSupabase
       .from("payroll_runs")
       .insert({
         period_start: body.periodStart,
         period_end: body.periodEnd,
         status: "draft",
+        payroll_mode: payrollMode,
         created_by: user?.id ?? null,
       })
       .select("id")

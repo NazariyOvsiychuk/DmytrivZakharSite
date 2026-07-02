@@ -1,4 +1,5 @@
 import { adminSupabase } from "@/lib/admin-server";
+import type { PayrollMode } from "@/lib/payroll-mode";
 
 export type PayrollCommand =
   | {
@@ -17,13 +18,13 @@ export type PayrollCommand =
       type: "AdvancePaid";
       employeeId: string;
       actorId: string | null;
-      payload: { amount: number; paymentDate: string; comment?: string | null };
+      payload: { amount: number; paymentDate: string; comment?: string | null; payrollMode: PayrollMode };
     }
   | {
       type: "SalaryPaid";
       employeeId: string;
       actorId: string | null;
-      payload: { amount: number; paymentDate: string; comment?: string | null };
+      payload: { amount: number; paymentDate: string; comment?: string | null; payrollMode: PayrollMode };
     };
 
 function asMoney(value: number) {
@@ -130,8 +131,10 @@ export async function recordPayment(args: {
   amount: number;
   paymentDate: string;
   comment?: string | null;
+  payrollMode?: PayrollMode;
 }) {
   const normalizedAmount = asMoney(args.amount);
+  const payrollMode = args.payrollMode ?? "main";
   const eventId = await appendDomainEvent({
     type: args.paymentType === "advance" ? "AdvancePaid" : "SalaryPaid",
     employeeId: args.employeeId,
@@ -140,6 +143,7 @@ export async function recordPayment(args: {
       amount: normalizedAmount,
       paymentDate: args.paymentDate,
       comment: args.comment ?? null,
+      payrollMode,
     },
   });
 
@@ -152,6 +156,7 @@ export async function recordPayment(args: {
       amount: normalizedAmount,
       comment: args.comment ?? null,
       created_by: args.actorId,
+      payroll_mode: payrollMode,
     })
     .select("id")
     .single();
@@ -168,7 +173,8 @@ export async function recordPayment(args: {
     comment: args.comment ?? null,
     related_event_id: eventId,
     created_by: args.actorId,
-    metadata: { paymentType: args.paymentType, paymentId: paymentRow.id },
+    payroll_mode: payrollMode,
+    metadata: { paymentType: args.paymentType, paymentId: paymentRow.id, payrollMode },
   });
 
   if (ledgerError) {

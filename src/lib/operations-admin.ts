@@ -94,13 +94,13 @@ function getRateForMoment(
   ratesByEmployee: Map<string, RateBase[]>
 ) {
   const rates = ratesByEmployee.get(employeeId) ?? [];
-  let rate = fallbackRate;
+  let monthlyBase = fallbackRate;
   for (const item of rates) {
     if (item.effective_from <= moment) {
-      rate = numeric(item.hourly_rate);
+      monthlyBase = numeric(item.hourly_rate);
     }
   }
-  return rate;
+  return monthlyBase;
 }
 
 async function fetchRateHistory() {
@@ -140,12 +140,14 @@ async function fetchCoreRange(periodStart: string, periodEnd: string) {
         .select("id, employee_id, payment_date, payment_type, amount, comment")
         .gte("payment_date", periodStart)
         .lte("payment_date", periodEnd)
+        .eq("payroll_mode", "main")
         .order("payment_date", { ascending: true }),
       adminSupabase
         .from("pay_adjustments")
         .select("employee_id, amount, kind, effective_date, reason")
         .gte("effective_date", periodStart)
-        .lte("effective_date", periodEnd),
+        .lte("effective_date", periodEnd)
+        .eq("payroll_mode", "main"),
       adminSupabase
         .from("schedule_days")
         .select("employee_id, work_date, expected_start, expected_end")

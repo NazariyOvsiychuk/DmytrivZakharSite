@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createUserScopedClient } from "@/lib/admin-server";
 import { buildPayrollSummary } from "@/lib/payroll-admin";
+import { normalizePayrollMode } from "@/lib/payroll-mode";
 
 export async function POST(request: NextRequest) {
   const accessToken = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -23,13 +24,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Доступ лише для адміністратора." }, { status: 403 });
   }
 
-  const body = (await request.json().catch(() => ({}))) as { periodStart?: string; periodEnd?: string };
+  const body = (await request.json().catch(() => ({}))) as { periodStart?: string; periodEnd?: string; payrollMode?: string };
   if (!body.periodStart || !body.periodEnd) {
     return NextResponse.json({ error: "Потрібні periodStart та periodEnd." }, { status: 400 });
   }
 
   try {
-    const payload = await buildPayrollSummary(body.periodStart, body.periodEnd);
+    const payload = await buildPayrollSummary(body.periodStart, body.periodEnd, normalizePayrollMode(body.payrollMode));
     return NextResponse.json({ payments: payload.payments });
   } catch (error) {
     return NextResponse.json(
@@ -38,4 +39,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

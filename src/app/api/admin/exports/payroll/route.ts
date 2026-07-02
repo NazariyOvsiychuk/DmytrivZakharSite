@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createUserScopedClient } from "@/lib/admin-server";
 import { buildPayrollSummary } from "@/lib/payroll-admin";
+import { normalizePayrollMode, payrollModeLabel } from "@/lib/payroll-mode";
 
 function csvEscape(value: unknown) {
   const raw = String(value ?? "");
@@ -34,18 +35,20 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const periodStart = searchParams.get("start");
   const periodEnd = searchParams.get("end");
+  const payrollMode = normalizePayrollMode(searchParams.get("mode"));
 
   if (!periodStart || !periodEnd) {
     return NextResponse.json({ error: "Потрібні start та end." }, { status: 400 });
   }
 
   try {
-    const summary = await buildPayrollSummary(periodStart, periodEnd);
+    const summary = await buildPayrollSummary(periodStart, periodEnd, payrollMode);
     const rows = [
       [
         "Працівник",
         "Email",
-        "Ставка",
+        payrollMode === "test" ? "Місячна ставка" : "Погодинна ставка",
+        "Розрахункова ставка за годину",
         "Години",
         "Нараховано",
         "Бонуси",
@@ -57,6 +60,7 @@ export async function GET(request: NextRequest) {
       ...summary.rows.map((row) => [
         row.fullName,
         row.email,
+        row.rateBaseAmount,
         row.hourlyRate,
         (row.workedMinutes / 60).toFixed(2),
         row.grossAmount.toFixed(2),
@@ -73,7 +77,8 @@ export async function GET(request: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename=\"payroll-${periodStart}-${periodEnd}.csv\"`,
+        "Content-Disposition": `attachment; filename=\"payroll-${payrollMode}-${periodStart}-${periodEnd}.csv\"`,
+        "X-Payroll-Mode": payrollModeLabel(payrollMode),
       },
     });
   } catch (error) {
@@ -83,4 +88,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
