@@ -110,8 +110,9 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
       .order("full_name", { ascending: true }),
     adminSupabase
       .from("employee_hourly_rates")
-      .select("employee_id, hourly_rate, effective_from")
-      .order("effective_from", { ascending: true }),
+      .select("employee_id, hourly_rate, effective_from, created_at")
+      .order("effective_from", { ascending: true })
+      .order("created_at", { ascending: true }),
     adminSupabase
       .from("shifts")
       .select("employee_id, shift_date, started_at, ended_at, duration_minutes, status")
@@ -174,7 +175,7 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
   }
 
   const payrollRowsMap = new Map<string, PayrollCostRow>();
-  const ratesByEmployee = new Map<string, Array<{ effectiveFrom: string; hourlyRate: number }>>();
+  const ratesByEmployee = new Map<string, Array<{ effectiveFrom: string; createdAt: string; hourlyRate: number }>>();
 
   for (const employee of employeesResult.data ?? []) {
     const hourlyRate = numeric(
@@ -195,8 +196,12 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
     const list = ratesByEmployee.get(employeeId) ?? [];
     list.push({
       effectiveFrom: String(rate.effective_from),
+      createdAt: String(rate.created_at),
       hourlyRate: numeric(rate.hourly_rate),
     });
+    list.sort((a, b) =>
+      a.effectiveFrom.localeCompare(b.effectiveFrom) || a.createdAt.localeCompare(b.createdAt)
+    );
     ratesByEmployee.set(employeeId, list);
   }
 

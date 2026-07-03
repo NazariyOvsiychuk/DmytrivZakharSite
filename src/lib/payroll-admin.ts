@@ -83,6 +83,10 @@ type RatePoint = {
   standardDayHours: number;
 };
 
+function compareRatePoints(a: RatePoint, b: RatePoint) {
+  return a.effectiveFrom.localeCompare(b.effectiveFrom) || a.createdAt.localeCompare(b.createdAt);
+}
+
 function buildShiftRate(payrollMode: PayrollMode, employeeId: string, fallbackRate: number, startedAt: string, ratesByEmployee: Map<
   string,
   RatePoint[]
@@ -104,7 +108,7 @@ function buildShiftRate(payrollMode: PayrollMode, employeeId: string, fallbackRa
       })
       .at(-1) ?? selected;
   } else {
-    for (const candidate of rates) {
+    for (const candidate of [...rates].sort(compareRatePoints)) {
       if (candidate.effectiveFrom <= startedAt) selected = candidate;
     }
   }
@@ -153,8 +157,9 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
           .order("created_at", { ascending: true })
       : adminSupabase
           .from("employee_hourly_rates")
-          .select("employee_id, hourly_rate, effective_from")
-          .order("effective_from", { ascending: true }),
+          .select("employee_id, hourly_rate, effective_from, created_at")
+          .order("effective_from", { ascending: true })
+          .order("created_at", { ascending: true }),
     adminSupabase
       .from("financial_ledger_entries")
       .select("employee_id, entry_type, amount, occurred_on")
@@ -205,7 +210,7 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
     const list = ratesByEmployee.get(rate.employee_id) ?? [];
     list.push({
       effectiveFrom: String(rate.effective_from),
-      createdAt: String("created_at" in rate ? rate.created_at : rate.effective_from),
+      createdAt: String(rate.created_at),
       amount: numeric("rate_amount" in rate ? rate.rate_amount : rate.hourly_rate),
       standardDayHours: numeric("standard_day_hours" in rate ? rate.standard_day_hours : 9) || 9,
     });
@@ -222,7 +227,10 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
             return monthOrder || a.createdAt.localeCompare(b.createdAt);
           })
           .at(-1)
-      : [...rates].reverse().find((rate) => rate.effectiveFrom.slice(0, 10) <= periodEnd);
+      : [...rates]
+          .sort(compareRatePoints)
+          .reverse()
+          .find((rate) => rate.effectiveFrom.slice(0, 10) <= periodEnd);
     if (latest) {
       row.rateBaseAmount = latest.amount;
       row.hourlyRate = payrollMode === "test"
@@ -410,9 +418,10 @@ export async function buildPayrollEmployeeDetail(
           .order("created_at", { ascending: true })
       : adminSupabase
           .from("employee_hourly_rates")
-          .select("employee_id, hourly_rate, effective_from")
+          .select("employee_id, hourly_rate, effective_from, created_at")
           .eq("employee_id", employeeId)
-          .order("effective_from", { ascending: true }),
+          .order("effective_from", { ascending: true })
+          .order("created_at", { ascending: true }),
   ]);
 
   if (profileResult.error) throw new Error(profileResult.error.message);
@@ -432,7 +441,7 @@ export async function buildPayrollEmployeeDetail(
     const list = ratesByEmployee.get(String(rate.employee_id)) ?? [];
     list.push({
       effectiveFrom: String(rate.effective_from),
-      createdAt: String("created_at" in rate ? rate.created_at : rate.effective_from),
+      createdAt: String(rate.created_at),
       amount: numeric("rate_amount" in rate ? rate.rate_amount : rate.hourly_rate),
       standardDayHours: numeric("standard_day_hours" in rate ? rate.standard_day_hours : 9) || 9,
     });

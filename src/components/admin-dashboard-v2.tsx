@@ -40,6 +40,11 @@ type EmployeeRow = {
     effective_from: string;
     created_at: string;
   }> | null;
+  employee_hourly_rates?: Array<{
+    hourly_rate: number;
+    effective_from: string;
+    created_at: string;
+  }> | null;
 };
 
 type ScheduleRow = {
@@ -163,6 +168,20 @@ function latestTestMonthlySalary(employee: EmployeeRow) {
   return [...(employee.employee_payroll_rates ?? [])]
     .filter((rate) => rate.payroll_mode === "test" && rate.rate_kind === "monthly")
     .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.rate_amount ?? 0;
+}
+
+function latestMainRateEffectiveDate(employee: EmployeeRow) {
+  const latest = [...(employee.employee_hourly_rates ?? [])]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+
+  if (!latest?.effective_from) return toDateInputValue(new Date());
+
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kiev",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(latest.effective_from));
 }
 
 function toDateInputValue(date: Date) {
@@ -366,7 +385,7 @@ export function AdminDashboardV2({ section }: { section: AdminSection }) {
         supabase
           .from("profiles")
           .select(
-            "id, full_name, email, is_active, employee_settings(hourly_rate,pin_code,fingerprint_id,rfid_card_uid,terminal_access_enabled,terminal_profile,enrollment_method,require_rfid,require_fingerprint,enrollment_status,enrollment_device_code), employee_payroll_rates!employee_payroll_rates_employee_id_fkey(payroll_mode,rate_kind,rate_amount,standard_day_hours,effective_from,created_at)"
+            "id, full_name, email, is_active, employee_settings(hourly_rate,pin_code,fingerprint_id,rfid_card_uid,terminal_access_enabled,terminal_profile,enrollment_method,require_rfid,require_fingerprint,enrollment_status,enrollment_device_code), employee_payroll_rates!employee_payroll_rates_employee_id_fkey(payroll_mode,rate_kind,rate_amount,standard_day_hours,effective_from,created_at), employee_hourly_rates!employee_hourly_rates_employee_id_fkey(hourly_rate,effective_from,created_at)"
           )
           .order("created_at", { ascending: false }),
         supabase
@@ -1588,6 +1607,7 @@ function EditableEmployeeCardV2({
   const [email, setEmail] = useState(employee.email);
   const [password, setPassword] = useState("");
   const [hourlyRate, setHourlyRate] = useState(String(settings?.hourly_rate ?? 0));
+  const [hourlyRateEffectiveFrom, setHourlyRateEffectiveFrom] = useState(latestMainRateEffectiveDate(employee));
   const [testMonthlySalary, setTestMonthlySalary] = useState(String(latestTestMonthlySalary(employee)));
   const [pinCode, setPinCode] = useState(settings?.pin_code ?? "");
   const [fingerprintId, setFingerprintId] = useState(settings?.fingerprint_id?.toString() ?? "");
@@ -1605,6 +1625,7 @@ function EditableEmployeeCardV2({
     setEmail(employee.email);
     setPassword("");
     setHourlyRate(String(nextSettings?.hourly_rate ?? 0));
+    setHourlyRateEffectiveFrom(latestMainRateEffectiveDate(employee));
     setTestMonthlySalary(String(latestTestMonthlySalary(employee)));
     setPinCode(nextSettings?.pin_code ?? "");
     setFingerprintId(nextSettings?.fingerprint_id?.toString() ?? "");
@@ -1620,6 +1641,7 @@ function EditableEmployeeCardV2({
       fullName,
       email,
       hourlyRate: Number(hourlyRate),
+      hourlyRateEffectiveFrom,
       testMonthlySalary: Number(testMonthlySalary),
       pinCode,
       fingerprintId: fingerprintId ? Number(fingerprintId) : null,
@@ -1733,6 +1755,10 @@ function EditableEmployeeCardV2({
               <label className="field">
                 <span>Основна погодинна ставка</span>
                 <input type="number" step="0.01" value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>Основна ставка діє з</span>
+                <input type="date" value={hourlyRateEffectiveFrom} onChange={(e) => setHourlyRateEffectiveFrom(e.target.value)} />
               </label>
               <label className="field">
                 <span>Тестова місячна ставка</span>

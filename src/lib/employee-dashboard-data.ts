@@ -62,9 +62,10 @@ export async function buildEmployeeDashboardData(employeeId: string) {
         .order("effective_date", { ascending: false }),
       adminSupabase
         .from("employee_hourly_rates")
-        .select("employee_id, hourly_rate, effective_from")
+        .select("employee_id, hourly_rate, effective_from, created_at")
         .eq("employee_id", employeeId)
-        .order("effective_from", { ascending: true }),
+        .order("effective_from", { ascending: true })
+        .order("created_at", { ascending: true }),
       adminSupabase
         .from("discipline_violations")
         .select("id, violation_type, violation_date, resolved")
@@ -89,8 +90,11 @@ export async function buildEmployeeDashboardData(employeeId: string) {
   );
   const rates = (rateHistoryResult.data ?? []).map((row) => ({
     effectiveFrom: String(row.effective_from),
+    createdAt: String(row.created_at),
     hourlyRate: numeric(row.hourly_rate),
-  }));
+  })).sort((a, b) =>
+    a.effectiveFrom.localeCompare(b.effectiveFrom) || a.createdAt.localeCompare(b.createdAt)
+  );
   const latestMonthlyBase = rates.at(-1)?.hourlyRate ?? fallbackMonthlyBase;
 
   const payrollItems = (payrollItemsResult.data ?? []).map((item: any) => ({

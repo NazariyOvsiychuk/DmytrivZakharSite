@@ -27,6 +27,55 @@ async function ensureAdmin(request: NextRequest) {
   return { user };
 }
 
+function businessDateStartIso(dateValue: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateValue);
+  if (!match) {
+    throw new Error("Некоректна дата початку дії ставки.");
+  }
+
+  const [, yearValue, monthValue, dayValue] = match;
+  const year = Number(yearValue);
+  const month = Number(monthValue);
+  const day = Number(dayValue);
+  const utcMidnight = Date.UTC(year, month - 1, day);
+  const localParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kiev",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(utcMidnight));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(localParts.find((candidate) => candidate.type === type)?.value ?? 0);
+  const localMidnightAsUtc = Date.UTC(
+    part("year"),
+    part("month") - 1,
+    part("day"),
+    part("hour"),
+    part("minute"),
+    part("second")
+  );
+
+  return new Date(utcMidnight - (localMidnightAsUtc - utcMidnight)).toISOString();
+}
+
+function businessDateFromIso(value: string | null | undefined) {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kiev",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
 export async function POST(request: NextRequest) {
   const auth = await ensureAdmin(request);
   if ("response" in auth) {
@@ -39,6 +88,7 @@ export async function POST(request: NextRequest) {
     email?: string;
     password?: string;
     hourlyRate: number;
+    hourlyRateEffectiveFrom?: string;
     testMonthlySalary?: number;
     pinCode: string;
     fingerprintId: number | null;
@@ -74,6 +124,14 @@ export async function POST(request: NextRequest) {
     .eq("employee_id", body.employeeId)
     .eq("payroll_mode", "test")
     .eq("rate_kind", "monthly")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: currentMainRate } = await adminSupabase
+    .from("employee_hourly_rates")
+    .select("hourly_rate, effective_from, created_at")
+    .eq("employee_id", body.employeeId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -207,12 +265,20 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (Number(currentSettings?.hourly_rate ?? 0) !== Number(body.hourlyRate ?? 0)) {
+  const mainRateChanged = Number(currentSettings?.hourly_rate ?? 0) !== Number(body.hourlyRate ?? 0);
+  const mainEffectiveDateChanged = Boolean(body.hourlyRateEffectiveFrom) &&
+    businessDateFromIso(currentMainRate?.effective_from) !== body.hourlyRateEffectiveFrom;
+
+  if (mainRateChanged || mainEffectiveDateChanged) {
     try {
+      const effectiveFrom = body.hourlyRateEffectiveFrom
+        ? businessDateStartIso(body.hourlyRateEffectiveFrom)
+        : new Date().toISOString();
       await recordHourlyRateChange({
         employeeId: body.employeeId,
         actorId: auth.user?.id ?? null,
         hourlyRate: body.hourlyRate,
+        effectiveFrom,
       });
     } catch (error) {
       return NextResponse.json(
