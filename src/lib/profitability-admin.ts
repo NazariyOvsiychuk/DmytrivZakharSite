@@ -199,9 +199,6 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
       createdAt: String(rate.created_at),
       hourlyRate: numeric(rate.hourly_rate),
     });
-    list.sort((a, b) =>
-      a.effectiveFrom.localeCompare(b.effectiveFrom) || a.createdAt.localeCompare(b.createdAt)
-    );
     ratesByEmployee.set(employeeId, list);
   }
 
@@ -213,7 +210,9 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
         employee.employee_settings as Array<{ hourly_rate: number }> | { hourly_rate: number } | null
       )?.hourly_rate
     );
-    const latestMonthlyBase = ratesByEmployee.get(employeeId)?.at(-1)?.hourlyRate ?? fallbackMonthlyBase;
+    const latestMonthlyBase = [...(ratesByEmployee.get(employeeId) ?? [])]
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .at(-1)?.hourlyRate ?? fallbackMonthlyBase;
     currentMonthlyBaseByEmployee.set(employeeId, latestMonthlyBase);
   }
 
@@ -237,12 +236,10 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
       shifts: shifts.map((shift) => {
         const startedAt = String(shift.started_at);
         const employeeRates = ratesByEmployee.get(employeeId) ?? [];
-        let monthlyBase = currentMonthlyBaseByEmployee.get(employeeId) ?? 0;
-        for (const candidate of employeeRates) {
-          if (candidate.effectiveFrom <= startedAt) {
-            monthlyBase = candidate.hourlyRate;
-          }
-        }
+        const monthlyBase = [...employeeRates]
+          .filter((candidate) => candidate.effectiveFrom <= startedAt)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+          .at(-1)?.hourlyRate ?? currentMonthlyBaseByEmployee.get(employeeId) ?? 0;
 
         return {
           shiftId: String(shift.id),

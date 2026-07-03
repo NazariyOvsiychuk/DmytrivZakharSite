@@ -284,7 +284,9 @@ export function resolveOvertimeSettings(args: {
 }) {
   if (args.payrollMode === "main") {
     return {
-      enabled: args.settings.overtimeEnabled,
+      // The main payroll remains the stable hours x historical hourly-rate ledger.
+      // Overtime experiments and date-range multipliers belong only to test mode.
+      enabled: false,
       thresholdMinutes: args.settings.overtimeDailyThresholdMinutes,
       multiplier: args.settings.overtimeMultiplier,
       source: "default" as const,

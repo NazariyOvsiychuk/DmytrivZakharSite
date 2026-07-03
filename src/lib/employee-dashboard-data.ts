@@ -92,10 +92,7 @@ export async function buildEmployeeDashboardData(employeeId: string) {
     effectiveFrom: String(row.effective_from),
     createdAt: String(row.created_at),
     hourlyRate: numeric(row.hourly_rate),
-  })).sort((a, b) =>
-    a.effectiveFrom.localeCompare(b.effectiveFrom) || a.createdAt.localeCompare(b.createdAt)
-  );
-  const latestMonthlyBase = rates.at(-1)?.hourlyRate ?? fallbackMonthlyBase;
+  }));
 
   const payrollItems = (payrollItemsResult.data ?? []).map((item: any) => ({
     id: String(item.id),
@@ -127,12 +124,10 @@ export async function buildEmployeeDashboardData(employeeId: string) {
       payrollMode: "main",
       shifts: shiftsForDay.map((shift) => {
         const startedAt = String(shift.started_at);
-        let monthlyBase = latestMonthlyBase;
-        for (const candidate of rates) {
-          if (candidate.effectiveFrom <= startedAt) {
-            monthlyBase = candidate.hourlyRate;
-          }
-        }
+        const monthlyBase = [...rates]
+          .filter((candidate) => candidate.effectiveFrom <= startedAt)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+          .at(-1)?.hourlyRate ?? fallbackMonthlyBase;
 
         return {
           shiftId: String(shift.id),

@@ -83,8 +83,11 @@ type RatePoint = {
   standardDayHours: number;
 };
 
-function compareRatePoints(a: RatePoint, b: RatePoint) {
-  return a.effectiveFrom.localeCompare(b.effectiveFrom) || a.createdAt.localeCompare(b.createdAt);
+function latestRecordedApplicableRate(rates: RatePoint[], effectiveAt: string) {
+  return [...rates]
+    .filter((candidate) => candidate.effectiveFrom <= effectiveAt)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .at(-1);
 }
 
 function buildShiftRate(payrollMode: PayrollMode, employeeId: string, fallbackRate: number, startedAt: string, ratesByEmployee: Map<
@@ -108,9 +111,7 @@ function buildShiftRate(payrollMode: PayrollMode, employeeId: string, fallbackRa
       })
       .at(-1) ?? selected;
   } else {
-    for (const candidate of [...rates].sort(compareRatePoints)) {
-      if (candidate.effectiveFrom <= startedAt) selected = candidate;
-    }
+    selected = latestRecordedApplicableRate(rates, startedAt) ?? selected;
   }
   return payrollMode === "test"
     ? calculateHourlyRateFromMonthlyBase(selected.amount, startedAt, selected.standardDayHours)
@@ -228,9 +229,9 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
           })
           .at(-1)
       : [...rates]
-          .sort(compareRatePoints)
-          .reverse()
-          .find((rate) => rate.effectiveFrom.slice(0, 10) <= periodEnd);
+          .filter((rate) => rate.effectiveFrom <= `${periodEnd}T23:59:59.999Z`)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+          .at(-1);
     if (latest) {
       row.rateBaseAmount = latest.amount;
       row.hourlyRate = payrollMode === "test"
