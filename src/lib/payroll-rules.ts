@@ -11,10 +11,10 @@ export type PayrollCompanySettings = {
   overtimeMultiplier: number;
 };
 
-export type EmployeeOvertimePolicy = {
-  employeeId: string;
-  weekday: number;
-  overtimeEnabled: boolean;
+export type PayrollOvertimePeriodRule = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
   overtimeMultiplier: number;
 };
 
@@ -39,6 +39,7 @@ export type ShiftCompensation = {
   overtimeMinutes: number;
   baseAmount: number;
   nightExtraAmount: number;
+  sundayExtraAmount: number;
   overtimeExtraAmount: number;
   grossAmount: number;
 };
@@ -212,7 +213,7 @@ function getShiftEnd(startedAt: string, endedAt: string | null, durationMinutes:
 }
 
 export async function loadPayrollRules(payrollMode: PayrollMode = "main") {
-  const [settingsResult, breaksResult, employeeOvertimePoliciesResult] = await Promise.all([
+  const [settingsResult, breaksResult, overtimePeriodRulesResult] = await Promise.all([
     adminSupabase
       .from("company_settings")
       .select("night_shift_enabled, night_shift_start, night_shift_end, night_shift_multiplier, overtime_enabled, overtime_daily_threshold_minutes, overtime_multiplier")
@@ -225,16 +226,15 @@ export async function loadPayrollRules(payrollMode: PayrollMode = "main") {
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
     adminSupabase
-      .from("employee_overtime_policies")
-      .select("employee_id, weekday, overtime_enabled, overtime_multiplier")
+      .from("payroll_overtime_period_rules")
+      .select("id, period_start, period_end, overtime_multiplier")
       .eq("payroll_mode", payrollMode)
-      .order("employee_id", { ascending: true })
-      .order("weekday", { ascending: true }),
+      .order("created_at", { ascending: true }),
   ]);
 
   if (settingsResult.error) throw new Error(settingsResult.error.message);
   if (breaksResult.error) throw new Error(breaksResult.error.message);
-  if (employeeOvertimePoliciesResult.error) throw new Error(employeeOvertimePoliciesResult.error.message);
+  if (overtimePeriodRulesResult.error) throw new Error(overtimePeriodRulesResult.error.message);
 
   const settings: PayrollCompanySettings = {
     nightShiftEnabled: Boolean(settingsResult.data?.night_shift_enabled),
@@ -262,32 +262,27 @@ export async function loadPayrollRules(payrollMode: PayrollMode = "main") {
     isActive: Boolean(row.is_active),
   }));
 
-  const employeeOvertimePolicies: EmployeeOvertimePolicy[] = (employeeOvertimePoliciesResult.data ?? []).map(
+  const overtimePeriodRules: PayrollOvertimePeriodRule[] = (overtimePeriodRulesResult.data ?? []).map(
     (row: any) => ({
-      employeeId: String(row.employee_id),
-      weekday: Math.min(7, Math.max(1, numeric(row.weekday))),
-      overtimeEnabled: Boolean(row.overtime_enabled),
+      id: String(row.id),
+      periodStart: String(row.period_start),
+      periodEnd: String(row.period_end),
       overtimeMultiplier: [1.25, 1.5].includes(numeric(row.overtime_multiplier))
         ? numeric(row.overtime_multiplier)
         : 1.25,
     })
   );
 
-  return { settings, breakPolicies, employeeOvertimePolicies };
+  return { settings, breakPolicies, overtimePeriodRules };
 }
 
 export function resolveOvertimeSettings(args: {
-  employeeId: string;
+  payrollMode: PayrollMode;
   shiftDate: string;
   settings: PayrollCompanySettings;
-  employeeOvertimePolicies: EmployeeOvertimePolicy[];
+  overtimePeriodRules: PayrollOvertimePeriodRule[];
 }) {
-  const weekday = isoWeekday(args.shiftDate);
-  const override = args.employeeOvertimePolicies.find(
-    (policy) => policy.employeeId === args.employeeId && policy.weekday === weekday
-  );
-
-  if (!override) {
+  if (args.payrollMode === "main") {
     return {
       enabled: args.settings.overtimeEnabled,
       thresholdMinutes: args.settings.overtimeDailyThresholdMinutes,
@@ -296,11 +291,15 @@ export function resolveOvertimeSettings(args: {
     };
   }
 
+  const override = [...args.overtimePeriodRules].reverse().find(
+    (rule) => args.shiftDate >= rule.periodStart && args.shiftDate <= rule.periodEnd
+  );
+
   return {
-    enabled: override.overtimeEnabled,
+    enabled: true,
     thresholdMinutes: 540,
-    multiplier: override.overtimeMultiplier,
-    source: "employee" as const,
+    multiplier: override?.overtimeMultiplier ?? 1.25,
+    source: override ? "period" as const : "default" as const,
   };
 }
 
@@ -324,6 +323,7 @@ export function calculateShiftCompensation(input: {
       overtimeMinutes: 0,
       baseAmount: 0,
       nightExtraAmount: 0,
+      sundayExtraAmount: 0,
       overtimeExtraAmount: 0,
       grossAmount: 0,
     } satisfies ShiftCompensation;
@@ -384,12 +384,14 @@ export function calculateShiftCompensation(input: {
     overtimeMinutes: 0,
     baseAmount: roundMoney(baseAmount),
     nightExtraAmount: roundMoney(nightExtraAmount),
+    sundayExtraAmount: 0,
     overtimeExtraAmount: 0,
     grossAmount: roundMoney(baseAmount + nightExtraAmount),
   } satisfies ShiftCompensation;
 }
 
 export function calculateDailyShiftCompensations(input: {
+  payrollMode?: PayrollMode;
   shifts: DailyShiftCompensationInput[];
   settings: PayrollCompanySettings;
   breakPolicies: BreakPolicy[];
@@ -447,6 +449,21 @@ export function calculateDailyShiftCompensations(input: {
   }
 
   for (const [businessDate, segments] of segmentsByBusinessDate.entries()) {
+    const isSunday = input.payrollMode === "test" && isoWeekday(businessDate) === 7;
+
+    if (isSunday) {
+      for (const segment of segments) {
+        const result = shiftResults.get(segment.shiftId);
+        if (!result) continue;
+        const sundayExtraAmount = (segment.payableMinutes / 60) * segment.hourlyRate * 0.25;
+        result.sundayExtraAmount = roundMoney(result.sundayExtraAmount + sundayExtraAmount);
+        result.grossAmount = roundMoney(
+          result.baseAmount + result.nightExtraAmount + result.sundayExtraAmount + result.overtimeExtraAmount
+        );
+        shiftResults.set(segment.shiftId, result);
+      }
+    }
+
     const overtimePolicy =
       input.overtimePolicyResolver?.(businessDate) ?? {
         enabled: input.settings.overtimeEnabled,
@@ -470,10 +487,14 @@ export function calculateDailyShiftCompensations(input: {
       const result = shiftResults.get(segment.shiftId);
       if (!result) continue;
 
-      const overtimeExtraAmount = (overtimeMinutes / 60) * segment.hourlyRate * (multiplier - 1);
+      const alreadyAppliedMultiplier = isSunday ? 1.25 : 1;
+      const overtimeExtraAmount =
+        (overtimeMinutes / 60) * segment.hourlyRate * Math.max(0, multiplier - alreadyAppliedMultiplier);
       result.overtimeMinutes += overtimeMinutes;
       result.overtimeExtraAmount = roundMoney(result.overtimeExtraAmount + overtimeExtraAmount);
-      result.grossAmount = roundMoney(result.baseAmount + result.nightExtraAmount + result.overtimeExtraAmount);
+      result.grossAmount = roundMoney(
+        result.baseAmount + result.nightExtraAmount + result.sundayExtraAmount + result.overtimeExtraAmount
+      );
       shiftResults.set(segment.shiftId, result);
     }
   }

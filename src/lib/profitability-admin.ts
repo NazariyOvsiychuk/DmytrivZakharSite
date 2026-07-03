@@ -228,6 +228,7 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
     if (!row) continue;
 
     const compensationMap = calculateDailyShiftCompensations({
+      payrollMode: "main",
       shifts: shifts.map((shift) => {
         const startedAt = String(shift.started_at);
         const employeeRates = ratesByEmployee.get(employeeId) ?? [];
@@ -252,10 +253,10 @@ export async function buildProfitabilitySnapshot(periodStart: string, periodEnd:
       breakPolicies: rules.breakPolicies,
       overtimePolicyResolver: (businessDate) =>
         resolveOvertimeSettings({
-          employeeId,
+          payrollMode: "main",
           shiftDate: businessDate,
           settings: rules.settings,
-          employeeOvertimePolicies: rules.employeeOvertimePolicies,
+          overtimePeriodRules: rules.overtimePeriodRules,
         }),
     });
 

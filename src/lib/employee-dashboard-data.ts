@@ -120,6 +120,7 @@ export async function buildEmployeeDashboardData(employeeId: string) {
 
   for (const shiftsForDay of groupedShifts.values()) {
     const dailyCompensationMap = calculateDailyShiftCompensations({
+      payrollMode: "main",
       shifts: shiftsForDay.map((shift) => {
         const startedAt = String(shift.started_at);
         let monthlyBase = latestMonthlyBase;
@@ -143,10 +144,10 @@ export async function buildEmployeeDashboardData(employeeId: string) {
       breakPolicies: rules.breakPolicies,
       overtimePolicyResolver: (businessDate) =>
         resolveOvertimeSettings({
-          employeeId,
+          payrollMode: "main",
           shiftDate: businessDate,
           settings: rules.settings,
-          employeeOvertimePolicies: rules.employeeOvertimePolicies,
+          overtimePeriodRules: rules.overtimePeriodRules,
         }),
     });
 

@@ -70,11 +70,11 @@ export async function POST(request: NextRequest) {
 
   const { data: currentTestRate } = await adminSupabase
     .from("employee_payroll_rates")
-    .select("rate_amount")
+    .select("rate_amount, effective_from, created_at")
     .eq("employee_id", body.employeeId)
     .eq("payroll_mode", "test")
     .eq("rate_kind", "monthly")
-    .order("effective_from", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
@@ -173,11 +173,24 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const businessDateParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Kiev",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const businessYear = businessDateParts.find((part) => part.type === "year")?.value;
+  const businessMonth = businessDateParts.find((part) => part.type === "month")?.value;
+  const currentMonthStart = `${businessYear}-${businessMonth}-01T00:00:00.000Z`;
+
   if (
     body.testMonthlySalary !== undefined &&
     Number.isFinite(Number(body.testMonthlySalary)) &&
     Number(body.testMonthlySalary) >= 0 &&
-    Number(currentTestRate?.rate_amount ?? 0) !== Number(body.testMonthlySalary)
+    (
+      Number(currentTestRate?.rate_amount ?? 0) !== Number(body.testMonthlySalary) ||
+      String(currentTestRate?.effective_from ?? "").slice(0, 10) !== currentMonthStart.slice(0, 10)
+    )
   ) {
     const { error: testRateError } = await adminSupabase.from("employee_payroll_rates").insert({
       employee_id: body.employeeId,
@@ -185,7 +198,7 @@ export async function POST(request: NextRequest) {
       rate_kind: "monthly",
       rate_amount: Math.round(Number(body.testMonthlySalary) * 100) / 100,
       standard_day_hours: 9,
-      effective_from: currentTestRate ? new Date().toISOString() : "1970-01-01T00:00:00.000Z",
+      effective_from: currentMonthStart,
       created_by: auth.user?.id ?? null,
     });
 

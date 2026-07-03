@@ -32,18 +32,13 @@ type EmployeeRow = {
     enrollment_status: string;
     enrollment_device_code: string | null;
   }> | null;
-  employee_overtime_policies?: Array<{
-    payroll_mode: "main" | "test";
-    weekday: number;
-    overtime_enabled: boolean;
-    overtime_multiplier: number;
-  }> | null;
   employee_payroll_rates?: Array<{
     payroll_mode: "main" | "test";
     rate_kind: "hourly" | "monthly";
     rate_amount: number;
     standard_day_hours: number;
     effective_from: string;
+    created_at: string;
   }> | null;
 };
 
@@ -81,11 +76,6 @@ type OvertimeRule = {
   overtime_multiplier: number;
 };
 
-type EmployeeOvertimeUiRule = {
-  weekday: number;
-  overtimeEnabled: boolean;
-  overtimeMultiplier: number;
-};
 
 type PayrollSummaryRow = {
   employeeId: string;
@@ -172,7 +162,7 @@ function employeeSettingsValue(
 function latestTestMonthlySalary(employee: EmployeeRow) {
   return [...(employee.employee_payroll_rates ?? [])]
     .filter((rate) => rate.payroll_mode === "test" && rate.rate_kind === "monthly")
-    .sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]?.rate_amount ?? 0;
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.rate_amount ?? 0;
 }
 
 function toDateInputValue(date: Date) {
@@ -190,40 +180,6 @@ function profileName(rel: unknown): string | null {
   if (Array.isArray(rel)) return (rel as any[])[0]?.full_name ?? null;
   if (typeof rel === "object") return (rel as any).full_name ?? null;
   return null;
-}
-
-const WEEKDAY_LABELS: Array<{ weekday: number; label: string }> = [
-  { weekday: 1, label: "Пн" },
-  { weekday: 2, label: "Вт" },
-  { weekday: 3, label: "Ср" },
-  { weekday: 4, label: "Чт" },
-  { weekday: 5, label: "Пт" },
-  { weekday: 6, label: "Сб" },
-  { weekday: 7, label: "Нд" },
-];
-
-function normalizeEmployeeOvertimePolicies(
-  value: Array<{
-    payroll_mode?: "main" | "test";
-    weekday: number;
-    overtime_enabled: boolean;
-    overtime_multiplier: number;
-  }> | null | undefined
-) {
-  const byWeekday = new Map<number, { weekday: number; overtime_enabled: boolean; overtime_multiplier: number }>();
-  for (const item of value ?? []) {
-    if (item.payroll_mode && item.payroll_mode !== "test") continue;
-    byWeekday.set(Number(item.weekday), item);
-  }
-
-  return WEEKDAY_LABELS.map(({ weekday }) => {
-    const current = byWeekday.get(weekday);
-    return {
-      weekday,
-      overtimeEnabled: Boolean(current?.overtime_enabled ?? false),
-      overtimeMultiplier: Number(current?.overtime_multiplier ?? 1.25),
-    } satisfies EmployeeOvertimeUiRule;
-  });
 }
 
 function countDayTypes(entries: ScheduleRow[]) {
@@ -410,7 +366,7 @@ export function AdminDashboardV2({ section }: { section: AdminSection }) {
         supabase
           .from("profiles")
           .select(
-            "id, full_name, email, is_active, employee_settings(hourly_rate,pin_code,fingerprint_id,rfid_card_uid,terminal_access_enabled,terminal_profile,enrollment_method,require_rfid,require_fingerprint,enrollment_status,enrollment_device_code), employee_overtime_policies(payroll_mode,weekday,overtime_enabled,overtime_multiplier), employee_payroll_rates!employee_payroll_rates_employee_id_fkey(payroll_mode,rate_kind,rate_amount,standard_day_hours,effective_from)"
+            "id, full_name, email, is_active, employee_settings(hourly_rate,pin_code,fingerprint_id,rfid_card_uid,terminal_access_enabled,terminal_profile,enrollment_method,require_rfid,require_fingerprint,enrollment_status,enrollment_device_code), employee_payroll_rates!employee_payroll_rates_employee_id_fkey(payroll_mode,rate_kind,rate_amount,standard_day_hours,effective_from,created_at)"
           )
           .order("created_at", { ascending: false }),
         supabase
@@ -1642,9 +1598,6 @@ function EditableEmployeeCardV2({
     settings?.enrollment_method ?? "rfid_and_fingerprint"
   );
   const [isActive, setIsActive] = useState(employee.is_active);
-  const [overtimePolicies, setOvertimePolicies] = useState<EmployeeOvertimeUiRule[]>(
-    normalizeEmployeeOvertimePolicies(employee.employee_overtime_policies)
-  );
 
   useEffect(() => {
     const nextSettings = employeeSettingsValue(employee.employee_settings);
@@ -1660,7 +1613,6 @@ function EditableEmployeeCardV2({
     setTerminalProfile(nextSettings?.terminal_profile ?? "raspberry_pi");
     setEnrollmentMethod(nextSettings?.enrollment_method ?? "rfid_and_fingerprint");
     setIsActive(employee.is_active);
-    setOvertimePolicies(normalizeEmployeeOvertimePolicies(employee.employee_overtime_policies));
   }, [employee]);
 
   async function saveBase() {
@@ -1676,7 +1628,6 @@ function EditableEmployeeCardV2({
       terminalProfile,
       enrollmentMethod,
       isActive,
-      overtimePolicies,
     });
   }
 
@@ -1813,47 +1764,6 @@ function EditableEmployeeCardV2({
                 <span>Активний</span>
                 <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
               </label>
-            </div>
-            <div className="editor-card">
-              <div className="panel-head">
-                <div>
-                  <p className="eyebrow">Тестовий payroll</p>
-                  <h2>Понаднормові по днях тижня</h2>
-                </div>
-              </div>
-              <p className="hint-text">
-                Після 9 годин за день. Для кожного дня можна вимкнути правило або вибрати коефіцієнт 1.25 чи 1.5.
-              </p>
-              <div className="field-row">
-                {overtimePolicies.map((policy) => {
-                  const label = WEEKDAY_LABELS.find((item) => item.weekday === policy.weekday)?.label ?? String(policy.weekday);
-                  return (
-                    <label key={policy.weekday} className="field">
-                      <span>{label}</span>
-                      <select
-                        value={policy.overtimeEnabled ? String(policy.overtimeMultiplier) : "off"}
-                        onChange={(event) =>
-                          setOvertimePolicies((current) =>
-                            current.map((item) =>
-                              item.weekday === policy.weekday
-                                ? {
-                                    ...item,
-                                    overtimeEnabled: event.target.value !== "off",
-                                    overtimeMultiplier: event.target.value === "1.5" ? 1.5 : 1.25,
-                                  }
-                                : item
-                            )
-                          )
-                        }
-                      >
-                        <option value="off">Вимкнено</option>
-                        <option value="1.25">1.25</option>
-                        <option value="1.5">1.5</option>
-                      </select>
-                    </label>
-                  );
-                })}
-              </div>
             </div>
             <button className="button button-primary" type="button" disabled={disabled} onClick={saveBase}>
               Зберегти

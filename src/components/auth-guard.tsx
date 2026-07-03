@@ -10,6 +10,15 @@ type AuthGuardProps = {
   allowGuest?: boolean;
 };
 
+function withTimeout<T>(promise: PromiseLike<T>, timeoutMs = 6000): Promise<T> {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error("AUTH_CHECK_TIMEOUT")), timeoutMs);
+    }),
+  ]);
+}
+
 export function AuthGuard({ children, allowedRoles, allowGuest = false }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -19,46 +28,56 @@ export function AuthGuard({ children, allowedRoles, allowGuest = false }: AuthGu
     let active = true;
 
     async function validate() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      try {
+        const {
+          data: { session },
+        } = await withTimeout(supabase.auth.getSession());
 
-      if (!session) {
-        if (allowGuest) {
-          setReady(true);
+        if (!active) return;
+
+        if (!session) {
+          if (allowGuest) {
+            setReady(true);
+            return;
+          }
+
+          router.replace("/login");
           return;
         }
 
-        router.replace("/login");
-        return;
+        const { data: profile, error: profileError } = await withTimeout(
+          supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", session.user.id)
+            .maybeSingle()
+        );
+
+        if (!active) return;
+
+        if (profileError || !profile?.role) {
+          await supabase.auth.signOut({ scope: "local" });
+          if (allowGuest) setReady(true);
+          else router.replace("/login");
+          return;
+        }
+
+        if (allowedRoles && !allowedRoles.includes(profile.role)) {
+          router.replace(profile.role === "admin" ? "/admin" : "/employee");
+          return;
+        }
+
+        if (pathname === "/login") {
+          router.replace(profile.role === "admin" ? "/admin" : "/employee");
+          return;
+        }
+
+        setReady(true);
+      } catch {
+        if (!active) return;
+        if (allowGuest) setReady(true);
+        else router.replace("/login");
       }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", session.user.id)
-        .maybeSingle();
-
-      if (!active) {
-        return;
-      }
-
-      if (!profile?.role) {
-        router.replace("/login");
-        return;
-      }
-
-      if (allowedRoles && !allowedRoles.includes(profile.role)) {
-        router.replace(profile.role === "admin" ? "/admin" : "/employee");
-        return;
-      }
-
-      if (pathname === "/login") {
-        router.replace(profile.role === "admin" ? "/admin" : "/employee");
-        return;
-      }
-
-      setReady(true);
     }
 
     validate();

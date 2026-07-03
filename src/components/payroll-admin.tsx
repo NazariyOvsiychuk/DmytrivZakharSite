@@ -84,6 +84,13 @@ type PaymentFormState = {
   comment: string;
 };
 
+type OvertimePeriodRule = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  multiplier: number;
+};
+
 function toDateInputValue(date: Date) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
@@ -168,6 +175,13 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
   const [payments, setPayments] = useState<PayrollPaymentRow[]>([]);
   const [paymentEditor, setPaymentEditor] = useState<PaymentFormState | null>(null);
   const [payrollMode, setPayrollMode] = useState<PayrollMode>(() => normalizePayrollMode(props.initialMode));
+  const [overtimePeriodRules, setOvertimePeriodRules] = useState<OvertimePeriodRule[]>([]);
+  const [overtimeRulesVersion, setOvertimeRulesVersion] = useState(0);
+  const [overtimePeriodForm, setOvertimePeriodForm] = useState({
+    periodStart: initialRange.start,
+    periodEnd: initialRange.end,
+    multiplier: "1.5",
+  });
 
   useEffect(() => {
     if (preset === "custom") return;
@@ -198,11 +212,55 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
         setPayments(historyResult.data.payments ?? []);
       }
 
+      if (payrollMode === "test") {
+        const overtimeResult = await callAdminJson<{ rules: OvertimePeriodRule[] }>(
+          "/api/admin/payroll/overtime-periods",
+          { body: { action: "list" } }
+        );
+        if (overtimeResult.ok) {
+          setOvertimePeriodRules(overtimeResult.data.rules ?? []);
+        } else {
+          setOvertimePeriodRules([]);
+          setMessage((current) => current ?? overtimeResult.error ?? "Не вдалося завантажити overtime-періоди.");
+        }
+      } else {
+        setOvertimePeriodRules([]);
+      }
+
       setLoading(false);
     }
 
     void load();
-  }, [payrollMode, range.end, range.start]);
+  }, [overtimeRulesVersion, payrollMode, range.end, range.start]);
+
+  async function createOvertimePeriod() {
+    const result = await callAdminJson<{ rules: OvertimePeriodRule[] }>("/api/admin/payroll/overtime-periods", {
+      body: {
+        action: "create",
+        periodStart: overtimePeriodForm.periodStart,
+        periodEnd: overtimePeriodForm.periodEnd,
+        multiplier: Number(overtimePeriodForm.multiplier),
+      },
+    });
+    if (!result.ok) {
+      setMessage(result.error ?? "Не вдалося створити overtime-період.");
+      return;
+    }
+    setMessage("Коефіцієнт для періоду збережено для всіх працівників.");
+    setOvertimeRulesVersion((value) => value + 1);
+  }
+
+  async function deleteOvertimePeriod(ruleId: string) {
+    const result = await callAdminJson<{ rules: OvertimePeriodRule[] }>("/api/admin/payroll/overtime-periods", {
+      body: { action: "delete", ruleId },
+    });
+    if (!result.ok) {
+      setMessage(result.error ?? "Не вдалося видалити overtime-період.");
+      return;
+    }
+    setMessage("Правило періоду видалено. Діє стандартний коефіцієнт 1.25.");
+    setOvertimeRulesVersion((value) => value + 1);
+  }
 
   async function handleExport() {
     const token = await getAccessToken();
@@ -358,6 +416,52 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
           </label>
         </div>
       </section>
+
+      {payrollMode === "test" ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Понаднормові для всіх</p>
+              <h2>Коефіцієнти за календарними періодами</h2>
+              <p className="hint">
+                Стандартно після 9 годин діє 1.25. У неділю всі години рахуються по 1.25. Тут можна поставити 1.5 усім працівникам на вибрані дати.
+              </p>
+            </div>
+          </div>
+          <div className="field-row">
+            <label className="field">
+              <span>Початок періоду</span>
+              <input type="date" value={overtimePeriodForm.periodStart} onChange={(event) => setOvertimePeriodForm((current) => ({ ...current, periodStart: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>Кінець періоду</span>
+              <input type="date" value={overtimePeriodForm.periodEnd} onChange={(event) => setOvertimePeriodForm((current) => ({ ...current, periodEnd: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>Коефіцієнт після 9 годин</span>
+              <select value={overtimePeriodForm.multiplier} onChange={(event) => setOvertimePeriodForm((current) => ({ ...current, multiplier: event.target.value }))}>
+                <option value="1.25">1.25</option>
+                <option value="1.5">1.5</option>
+              </select>
+            </label>
+            <button type="button" className="button button-primary" onClick={createOvertimePeriod}>
+              Застосувати для всіх
+            </button>
+          </div>
+          <div className="schedule-table">
+            {overtimePeriodRules.map((rule) => (
+              <div key={rule.id} className="table-row stack">
+                <strong>{formatDate(rule.periodStart)} – {formatDate(rule.periodEnd)}</strong>
+                <span>Понаднормові: ×{rule.multiplier}</span>
+                <button type="button" className="button button-danger" onClick={() => deleteOvertimePeriod(rule.id)}>
+                  Видалити правило
+                </button>
+              </div>
+            ))}
+            {!overtimePeriodRules.length ? <p className="hint">Спеціальних періодів немає. Для всіх діє стандартний коефіцієнт 1.25.</p> : null}
+          </div>
+        </section>
+      ) : null}
 
       {message ? <section className="panel notice-panel">{message}</section> : null}
 

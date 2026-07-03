@@ -78,6 +78,7 @@ function relationFirst<T>(value: T | T[] | null | undefined): T | null {
 
 type RatePoint = {
   effectiveFrom: string;
+  createdAt: string;
   amount: number;
   standardDayHours: number;
 };
@@ -89,12 +90,22 @@ function buildShiftRate(payrollMode: PayrollMode, employeeId: string, fallbackRa
   const rates = ratesByEmployee.get(employeeId) ?? [];
   let selected: RatePoint = {
     effectiveFrom: "",
+    createdAt: "",
     amount: fallbackRate,
     standardDayHours: 9,
   };
-  for (const candidate of rates) {
-    if (candidate.effectiveFrom <= startedAt) {
-      selected = candidate;
+  if (payrollMode === "test") {
+    const targetMonth = startedAt.slice(0, 7);
+    selected = rates
+      .filter((candidate) => candidate.effectiveFrom.slice(0, 7) <= targetMonth)
+      .sort((a, b) => {
+        const monthOrder = a.effectiveFrom.slice(0, 7).localeCompare(b.effectiveFrom.slice(0, 7));
+        return monthOrder || a.createdAt.localeCompare(b.createdAt);
+      })
+      .at(-1) ?? selected;
+  } else {
+    for (const candidate of rates) {
+      if (candidate.effectiveFrom <= startedAt) selected = candidate;
     }
   }
   return payrollMode === "test"
@@ -135,10 +146,11 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
     payrollMode === "test"
       ? adminSupabase
           .from("employee_payroll_rates")
-          .select("employee_id, rate_amount, standard_day_hours, effective_from")
+          .select("employee_id, rate_amount, standard_day_hours, effective_from, created_at")
           .eq("payroll_mode", "test")
           .eq("rate_kind", "monthly")
           .order("effective_from", { ascending: true })
+          .order("created_at", { ascending: true })
       : adminSupabase
           .from("employee_hourly_rates")
           .select("employee_id, hourly_rate, effective_from")
@@ -193,6 +205,7 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
     const list = ratesByEmployee.get(rate.employee_id) ?? [];
     list.push({
       effectiveFrom: String(rate.effective_from),
+      createdAt: String("created_at" in rate ? rate.created_at : rate.effective_from),
       amount: numeric("rate_amount" in rate ? rate.rate_amount : rate.hourly_rate),
       standardDayHours: numeric("standard_day_hours" in rate ? rate.standard_day_hours : 9) || 9,
     });
@@ -201,7 +214,15 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
 
   for (const row of rows.values()) {
     const rates = ratesByEmployee.get(row.employeeId) ?? [];
-    const latest = [...rates].reverse().find((rate) => rate.effectiveFrom.slice(0, 10) <= periodEnd);
+    const latest = payrollMode === "test"
+      ? [...rates]
+          .filter((rate) => rate.effectiveFrom.slice(0, 7) <= periodEnd.slice(0, 7))
+          .sort((a, b) => {
+            const monthOrder = a.effectiveFrom.slice(0, 7).localeCompare(b.effectiveFrom.slice(0, 7));
+            return monthOrder || a.createdAt.localeCompare(b.createdAt);
+          })
+          .at(-1)
+      : [...rates].reverse().find((rate) => rate.effectiveFrom.slice(0, 10) <= periodEnd);
     if (latest) {
       row.rateBaseAmount = latest.amount;
       row.hourlyRate = payrollMode === "test"
@@ -224,6 +245,7 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
     if (!row) continue;
 
     const compensationMap = calculateDailyShiftCompensations({
+      payrollMode,
       shifts: shifts.map((shift) => {
         const minutes = Math.max(0, Math.floor(numeric(shift.duration_minutes)));
         const startedAt = String(shift.started_at);
@@ -247,10 +269,10 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
       breakPolicies: rules.breakPolicies,
       overtimePolicyResolver: (businessDate) =>
         resolveOvertimeSettings({
-          employeeId,
+          payrollMode,
           shiftDate: businessDate,
           settings: rules.settings,
-          employeeOvertimePolicies: rules.employeeOvertimePolicies,
+          overtimePeriodRules: rules.overtimePeriodRules,
         }),
     });
 
@@ -380,11 +402,12 @@ export async function buildPayrollEmployeeDetail(
     payrollMode === "test"
       ? adminSupabase
           .from("employee_payroll_rates")
-          .select("employee_id, rate_amount, standard_day_hours, effective_from")
+          .select("employee_id, rate_amount, standard_day_hours, effective_from, created_at")
           .eq("employee_id", employeeId)
           .eq("payroll_mode", "test")
           .eq("rate_kind", "monthly")
           .order("effective_from", { ascending: true })
+          .order("created_at", { ascending: true })
       : adminSupabase
           .from("employee_hourly_rates")
           .select("employee_id, hourly_rate, effective_from")
@@ -409,6 +432,7 @@ export async function buildPayrollEmployeeDetail(
     const list = ratesByEmployee.get(String(rate.employee_id)) ?? [];
     list.push({
       effectiveFrom: String(rate.effective_from),
+      createdAt: String("created_at" in rate ? rate.created_at : rate.effective_from),
       amount: numeric("rate_amount" in rate ? rate.rate_amount : rate.hourly_rate),
       standardDayHours: numeric("standard_day_hours" in rate ? rate.standard_day_hours : 9) || 9,
     });
@@ -432,6 +456,7 @@ export async function buildPayrollEmployeeDetail(
 
   for (const shifts of groupedEmployeeShifts.values()) {
     const dailyCompensationMap = calculateDailyShiftCompensations({
+      payrollMode,
       shifts: shifts.map((shift) => {
         const startedAt = String(shift.started_at);
         return {
@@ -454,10 +479,10 @@ export async function buildPayrollEmployeeDetail(
       breakPolicies: rules.breakPolicies,
       overtimePolicyResolver: (businessDate) =>
         resolveOvertimeSettings({
-          employeeId,
+          payrollMode,
           shiftDate: businessDate,
           settings: rules.settings,
-          employeeOvertimePolicies: rules.employeeOvertimePolicies,
+          overtimePeriodRules: rules.overtimePeriodRules,
         }),
     });
 
