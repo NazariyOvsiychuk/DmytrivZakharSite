@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createUserScopedClient } from "@/lib/admin-server";
 import { buildPayrollSummary } from "@/lib/payroll-admin";
-import { normalizePayrollMode, payrollModeLabel } from "@/lib/payroll-mode";
+import { isMonthlyPayrollMode, normalizePayrollMode, payrollModeLabel } from "@/lib/payroll-mode";
 
 function csvEscape(value: unknown) {
   const raw = String(value ?? "");
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
       [
         "Працівник",
         "Email",
-        payrollMode === "test" ? "Місячна ставка" : "Погодинна ставка",
+        isMonthlyPayrollMode(payrollMode) ? "Місячна ставка" : "Погодинна ставка",
         "Розрахункова ставка за годину",
         "Години",
         "Нараховано",

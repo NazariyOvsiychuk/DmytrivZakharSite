@@ -90,6 +90,7 @@ export async function POST(request: NextRequest) {
     hourlyRate: number;
     hourlyRateEffectiveFrom?: string;
     testMonthlySalary?: number;
+    test2HourlyRate?: number;
     pinCode: string;
     fingerprintId: number | null;
     rfidUid?: string | null;
@@ -124,6 +125,16 @@ export async function POST(request: NextRequest) {
     .eq("employee_id", body.employeeId)
     .eq("payroll_mode", "test")
     .eq("rate_kind", "monthly")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: currentTest2Rate } = await adminSupabase
+    .from("employee_payroll_rates")
+    .select("rate_amount, effective_from, created_at")
+    .eq("employee_id", body.employeeId)
+    .eq("payroll_mode", "test_2")
+    .eq("rate_kind", "hourly")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -262,6 +273,27 @@ export async function POST(request: NextRequest) {
 
     if (testRateError) {
       return NextResponse.json({ error: testRateError.message }, { status: 400 });
+    }
+  }
+
+  if (
+    body.test2HourlyRate !== undefined &&
+    Number.isFinite(Number(body.test2HourlyRate)) &&
+    Number(body.test2HourlyRate) >= 0 &&
+    Number(currentTest2Rate?.rate_amount ?? 155) !== Number(body.test2HourlyRate)
+  ) {
+    const { error: test2RateError } = await adminSupabase.from("employee_payroll_rates").insert({
+      employee_id: body.employeeId,
+      payroll_mode: "test_2",
+      rate_kind: "hourly",
+      rate_amount: Math.round(Number(body.test2HourlyRate) * 100) / 100,
+      standard_day_hours: 9,
+      effective_from: new Date().toISOString(),
+      created_by: auth.user?.id ?? null,
+    });
+
+    if (test2RateError) {
+      return NextResponse.json({ error: test2RateError.message }, { status: 400 });
     }
   }
 

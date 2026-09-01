@@ -293,6 +293,15 @@ export function resolveOvertimeSettings(args: {
     };
   }
 
+  if (args.payrollMode === "test_2") {
+    return {
+      enabled: true,
+      thresholdMinutes: 540,
+      multiplier: 1.25,
+      source: "default" as const,
+    };
+  }
+
   const override = [...args.overtimePeriodRules].reverse().find(
     (rule) => args.shiftDate >= rule.periodStart && args.shiftDate <= rule.periodEnd
   );
@@ -451,6 +460,8 @@ export function calculateDailyShiftCompensations(input: {
   }
 
   for (const [businessDate, segments] of segmentsByBusinessDate.entries()) {
+    // Sunday uplift belongs to the original monthly test formula only.
+    // Test mode 2 keeps solely the 1.25 overtime rule after nine hours.
     const isSunday = input.payrollMode === "test" && isoWeekday(businessDate) === 7;
 
     if (isSunday) {

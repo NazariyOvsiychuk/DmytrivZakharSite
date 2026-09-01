@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminSupabase, createUserScopedClient } from "@/lib/admin-server";
+import { normalizePayrollMode } from "@/lib/payroll-mode";
 
 async function requireAdmin(request: NextRequest) {
   const accessToken = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -25,7 +26,12 @@ export async function POST(request: NextRequest) {
     periodEnd?: string;
     multiplier?: number;
     ruleId?: string;
+    payrollMode?: string;
   };
+  const payrollMode = normalizePayrollMode(body.payrollMode);
+  if (payrollMode !== "test") {
+    return NextResponse.json({ error: "Правила періодів доступні лише в першому тестовому режимі." }, { status: 400 });
+  }
 
   if (body.action === "create") {
     if (!body.periodStart || !body.periodEnd || body.periodEnd < body.periodStart) {
@@ -33,7 +39,7 @@ export async function POST(request: NextRequest) {
     }
     const multiplier = Number(body.multiplier) === 1.5 ? 1.5 : 1.25;
     const { error } = await adminSupabase.from("payroll_overtime_period_rules").insert({
-      payroll_mode: "test",
+      payroll_mode: payrollMode,
       period_start: body.periodStart,
       period_end: body.periodEnd,
       overtime_multiplier: multiplier,
@@ -48,14 +54,14 @@ export async function POST(request: NextRequest) {
       .from("payroll_overtime_period_rules")
       .delete()
       .eq("id", body.ruleId)
-      .eq("payroll_mode", "test");
+      .eq("payroll_mode", payrollMode);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
   const { data, error } = await adminSupabase
     .from("payroll_overtime_period_rules")
     .select("id, period_start, period_end, overtime_multiplier, created_at")
-    .eq("payroll_mode", "test")
+    .eq("payroll_mode", payrollMode)
     .order("period_start", { ascending: false })
     .order("created_at", { ascending: false });
 

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatDate, formatDateTime, formatHours, formatMoney } from "@/lib/format";
 import { getAccessToken } from "@/lib/supabase";
-import { normalizePayrollMode, payrollModeLabel, type PayrollMode } from "@/lib/payroll-mode";
+import { isMonthlyPayrollMode, isTestPayrollMode, normalizePayrollMode, payrollModeLabel, type PayrollMode } from "@/lib/payroll-mode";
 
 type PeriodPreset = "today" | "week" | "month" | "previousMonth" | "custom";
 type PaymentType = "advance" | "salary";
@@ -215,7 +215,7 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
       if (payrollMode === "test") {
         const overtimeResult = await callAdminJson<{ rules: OvertimePeriodRule[] }>(
           "/api/admin/payroll/overtime-periods",
-          { body: { action: "list" } }
+          { body: { action: "list", payrollMode } }
         );
         if (overtimeResult.ok) {
           setOvertimePeriodRules(overtimeResult.data.rules ?? []);
@@ -240,6 +240,7 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
         periodStart: overtimePeriodForm.periodStart,
         periodEnd: overtimePeriodForm.periodEnd,
         multiplier: Number(overtimePeriodForm.multiplier),
+        payrollMode,
       },
     });
     if (!result.ok) {
@@ -252,7 +253,7 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
 
   async function deleteOvertimePeriod(ruleId: string) {
     const result = await callAdminJson<{ rules: OvertimePeriodRule[] }>("/api/admin/payroll/overtime-periods", {
-      body: { action: "delete", ruleId },
+      body: { action: "delete", ruleId, payrollMode },
     });
     if (!result.ok) {
       setMessage(result.error ?? "Не вдалося видалити overtime-період.");
@@ -372,7 +373,7 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
 
       <section className="panel payroll-toolbar">
         <div className="segmented-control" aria-label="Режим нарахувань">
-          {(["main", "test"] as PayrollMode[]).map((mode) => (
+          {(["main", "test", "test_2"] as PayrollMode[]).map((mode) => (
             <button
               key={mode}
               type="button"
@@ -383,7 +384,7 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
             </button>
           ))}
         </div>
-        {payrollMode === "test" ? (
+        {isTestPayrollMode(payrollMode) ? (
           <p className="hint">Тестовий режим не змінює основні нарахування, виплати чи баланс.</p>
         ) : null}
         <div className="segmented-control">
@@ -508,7 +509,7 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
           <div className="schedule-table">
             <div className="table-row header payroll-summary-row">
               <strong>Працівник</strong>
-              <span>{payrollMode === "test" ? "Місячна / за годину" : "Ставка за годину"}</span>
+              <span>{isMonthlyPayrollMode(payrollMode) ? "Місячна / за годину" : "Ставка за годину"}</span>
               <span>Години</span>
               <span>Нараховано</span>
               <span>Бонуси / штрафи</span>
@@ -525,7 +526,7 @@ export function PayrollAdminPage(props: { initialMode?: PayrollMode } = {}) {
               >
                 <strong>{row.fullName}</strong>
                 <span>
-                  {payrollMode === "test"
+                  {isMonthlyPayrollMode(payrollMode)
                     ? `${formatMoney(row.rateBaseAmount)} / ${formatMoney(row.hourlyRate)}`
                     : formatMoney(row.hourlyRate)}
                 </span>
@@ -851,7 +852,7 @@ export function PayrollEmployeePage(props: {
 
         <div className="payroll-date-grid compact">
           <div className="segmented-control">
-            {(["main", "test"] as PayrollMode[]).map((mode) => (
+            {(["main", "test", "test_2"] as PayrollMode[]).map((mode) => (
               <button key={mode} type="button" className={payrollMode === mode ? "active" : ""} onClick={() => setPayrollMode(mode)}>
                 {payrollModeLabel(mode)}
               </button>

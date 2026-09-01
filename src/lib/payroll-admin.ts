@@ -5,7 +5,7 @@ import {
   loadPayrollRules,
   resolveOvertimeSettings,
 } from "@/lib/payroll-rules";
-import type { PayrollMode } from "@/lib/payroll-mode";
+import { isMonthlyPayrollMode, isTestPayrollMode, type PayrollMode } from "@/lib/payroll-mode";
 
 export type PayrollSummaryRow = {
   employeeId: string;
@@ -101,7 +101,7 @@ function buildShiftRate(payrollMode: PayrollMode, employeeId: string, fallbackRa
     amount: fallbackRate,
     standardDayHours: 9,
   };
-  if (payrollMode === "test") {
+  if (isMonthlyPayrollMode(payrollMode)) {
     const targetMonth = startedAt.slice(0, 7);
     selected = rates
       .filter((candidate) => candidate.effectiveFrom.slice(0, 7) <= targetMonth)
@@ -113,7 +113,7 @@ function buildShiftRate(payrollMode: PayrollMode, employeeId: string, fallbackRa
   } else {
     selected = latestRecordedApplicableRate(rates, startedAt) ?? selected;
   }
-  return payrollMode === "test"
+  return isMonthlyPayrollMode(payrollMode)
     ? calculateHourlyRateFromMonthlyBase(selected.amount, startedAt, selected.standardDayHours)
     : selected.amount;
 }
@@ -148,12 +148,12 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
       .gte("effective_date", periodStart)
       .lte("effective_date", periodEnd)
       .eq("payroll_mode", payrollMode),
-    payrollMode === "test"
+    isTestPayrollMode(payrollMode)
       ? adminSupabase
           .from("employee_payroll_rates")
           .select("employee_id, rate_amount, standard_day_hours, effective_from, created_at")
-          .eq("payroll_mode", "test")
-          .eq("rate_kind", "monthly")
+          .eq("payroll_mode", payrollMode)
+          .eq("rate_kind", isMonthlyPayrollMode(payrollMode) ? "monthly" : "hourly")
           .order("effective_from", { ascending: true })
           .order("created_at", { ascending: true })
       : adminSupabase
@@ -189,14 +189,14 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
         employee.employee_settings as Array<{ hourly_rate: number }> | { hourly_rate: number } | null
       )?.hourly_rate
     );
-    fallbackRateByEmployee.set(employee.id, payrollMode === "main" ? mainHourlyRate : 0);
+    fallbackRateByEmployee.set(employee.id, payrollMode === "main" ? mainHourlyRate : payrollMode === "test_2" ? 155 : 0);
     rows.set(employee.id, {
       employeeId: employee.id,
       fullName: employee.full_name ?? "Працівник",
       email: employee.email ?? "",
-      hourlyRate: payrollMode === "main" ? mainHourlyRate : 0,
-      rateBaseAmount: payrollMode === "main" ? mainHourlyRate : 0,
-      rateKind: payrollMode === "test" ? "monthly" : "hourly",
+      hourlyRate: payrollMode === "main" ? mainHourlyRate : payrollMode === "test_2" ? 155 : 0,
+      rateBaseAmount: payrollMode === "main" ? mainHourlyRate : payrollMode === "test_2" ? 155 : 0,
+      rateKind: isMonthlyPayrollMode(payrollMode) ? "monthly" : "hourly",
       workedMinutes: 0,
       grossAmount: 0,
       bonusesAmount: 0,
@@ -220,7 +220,7 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
 
   for (const row of rows.values()) {
     const rates = ratesByEmployee.get(row.employeeId) ?? [];
-    const latest = payrollMode === "test"
+    const latest = isMonthlyPayrollMode(payrollMode)
       ? [...rates]
           .filter((rate) => rate.effectiveFrom.slice(0, 7) <= periodEnd.slice(0, 7))
           .sort((a, b) => {
@@ -234,7 +234,7 @@ export async function buildPayrollSummary(periodStart: string, periodEnd: string
           .at(-1);
     if (latest) {
       row.rateBaseAmount = latest.amount;
-      row.hourlyRate = payrollMode === "test"
+      row.hourlyRate = isMonthlyPayrollMode(payrollMode)
         ? calculateHourlyRateFromMonthlyBase(latest.amount, periodEnd, latest.standardDayHours)
         : latest.amount;
     }
@@ -408,13 +408,13 @@ export async function buildPayrollEmployeeDetail(
       .eq("payroll_mode", payrollMode)
       .order("effective_date", { ascending: false })
       .order("created_at", { ascending: false }),
-    payrollMode === "test"
+    isTestPayrollMode(payrollMode)
       ? adminSupabase
           .from("employee_payroll_rates")
           .select("employee_id, rate_amount, standard_day_hours, effective_from, created_at")
           .eq("employee_id", employeeId)
-          .eq("payroll_mode", "test")
-          .eq("rate_kind", "monthly")
+          .eq("payroll_mode", payrollMode)
+          .eq("rate_kind", isMonthlyPayrollMode(payrollMode) ? "monthly" : "hourly")
           .order("effective_from", { ascending: true })
           .order("created_at", { ascending: true })
       : adminSupabase
@@ -479,7 +479,7 @@ export async function buildPayrollEmployeeDetail(
           hourlyRate: buildShiftRate(
             payrollMode,
             employeeId,
-            payrollMode === "main" ? fallbackMainHourlyRate : 0,
+            payrollMode === "main" ? fallbackMainHourlyRate : payrollMode === "test_2" ? 155 : 0,
             startedAt,
             ratesByEmployee
           ),
@@ -507,7 +507,7 @@ export async function buildPayrollEmployeeDetail(
       fullName: String(profileResult.data.full_name ?? "Працівник"),
       email: String(profileResult.data.email ?? ""),
       hourlyRate:
-        summary.hourlyRate || (payrollMode === "main" ? fallbackMainHourlyRate : 0),
+        summary.hourlyRate || (payrollMode === "main" ? fallbackMainHourlyRate : payrollMode === "test_2" ? 155 : 0),
     },
     summary,
     shifts: (shiftsResult.data ?? []).map((shift) => {

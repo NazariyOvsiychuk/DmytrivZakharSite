@@ -33,7 +33,7 @@ type EmployeeRow = {
     enrollment_device_code: string | null;
   }> | null;
   employee_payroll_rates?: Array<{
-    payroll_mode: "main" | "test";
+    payroll_mode: "main" | "test" | "test_2";
     rate_kind: "hourly" | "monthly";
     rate_amount: number;
     standard_day_hours: number;
@@ -168,6 +168,12 @@ function latestTestMonthlySalary(employee: EmployeeRow) {
   return [...(employee.employee_payroll_rates ?? [])]
     .filter((rate) => rate.payroll_mode === "test" && rate.rate_kind === "monthly")
     .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.rate_amount ?? 0;
+}
+
+function latestTest2HourlyRate(employee: EmployeeRow) {
+  return [...(employee.employee_payroll_rates ?? [])]
+    .filter((rate) => rate.payroll_mode === "test_2" && rate.rate_kind === "hourly")
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.rate_amount ?? 155;
 }
 
 function latestMainRateEffectiveDate(employee: EmployeeRow) {
@@ -1609,6 +1615,7 @@ function EditableEmployeeCardV2({
   const [hourlyRate, setHourlyRate] = useState(String(settings?.hourly_rate ?? 0));
   const [hourlyRateEffectiveFrom, setHourlyRateEffectiveFrom] = useState(latestMainRateEffectiveDate(employee));
   const [testMonthlySalary, setTestMonthlySalary] = useState(String(latestTestMonthlySalary(employee)));
+  const [test2HourlyRate, setTest2HourlyRate] = useState(String(latestTest2HourlyRate(employee)));
   const [pinCode, setPinCode] = useState(settings?.pin_code ?? "");
   const [fingerprintId, setFingerprintId] = useState(settings?.fingerprint_id?.toString() ?? "");
   const [rfidUid, setRfidUid] = useState(settings?.rfid_card_uid ?? "");
@@ -1627,6 +1634,7 @@ function EditableEmployeeCardV2({
     setHourlyRate(String(nextSettings?.hourly_rate ?? 0));
     setHourlyRateEffectiveFrom(latestMainRateEffectiveDate(employee));
     setTestMonthlySalary(String(latestTestMonthlySalary(employee)));
+    setTest2HourlyRate(String(latestTest2HourlyRate(employee)));
     setPinCode(nextSettings?.pin_code ?? "");
     setFingerprintId(nextSettings?.fingerprint_id?.toString() ?? "");
     setRfidUid(nextSettings?.rfid_card_uid ?? "");
@@ -1643,6 +1651,7 @@ function EditableEmployeeCardV2({
       hourlyRate: Number(hourlyRate),
       hourlyRateEffectiveFrom,
       testMonthlySalary: Number(testMonthlySalary),
+      test2HourlyRate: Number(test2HourlyRate),
       pinCode,
       fingerprintId: fingerprintId ? Number(fingerprintId) : null,
       rfidUid: rfidUid || null,
@@ -1763,6 +1772,10 @@ function EditableEmployeeCardV2({
               <label className="field">
                 <span>Тестова місячна ставка</span>
                 <input type="number" min="0" step="0.01" value={testMonthlySalary} onChange={(e) => setTestMonthlySalary(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>Тестовий 2: погодинна ставка</span>
+                <input type="number" min="0" step="0.01" value={test2HourlyRate} onChange={(e) => setTest2HourlyRate(e.target.value)} />
               </label>
               <label className="field">
                 <span>Профіль терміналу</span>
